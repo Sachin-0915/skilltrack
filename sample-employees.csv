@@ -1,0 +1,6 @@
+full_name,email,department,role,manager_email
+Priya Nair,priya.test@example.com,Sales,manager,
+Rahul Verma,rahul.test@example.com,Sales,learner,priya.test@example.com
+Sneha Iyer,sneha.test@example.com,Engineering,learner,
+Arjun Patel,arjun.test@example.com,Engineering,learner,
+Meera Joshi,meera.test@example.com,Finance,learner,

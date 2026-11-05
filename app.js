@@ -1,0 +1,352 @@
+/* SkillTrack - Week 1: login, roles, companies, employees */
+const cfg = window.SKILLTRACK_CONFIG || {};
+const $ = s => document.querySelector(s);
+const app = $('#app');
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ROLES = { org_admin: 'Org Admin', manager: 'Manager', learner: 'Learner' };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SITE = location.origin + location.pathname;
+
+let sb = null;
+let me = null;            // { user, member, isSuper, company }
+let view = null;          // current screen name
+
+function toast(text, ms = 3500) {
+  const t = $('#toast'); t.textContent = text; t.hidden = false;
+  clearTimeout(t._h); t._h = setTimeout(() => t.hidden = true, ms);
+}
+function friendly(err) {
+  const m = (err && (err.message || err.error_description)) || String(err);
+  if (/Database error saving new user/i.test(m)) return 'This email has not been added by your HR admin yet.';
+  if (/duplicate key|members_email_unique/i.test(m)) return 'This email already exists in SkillTrack.';
+  if (/row-level security/i.test(m)) return 'You do not have permission to do this.';
+  if (/Invalid login credentials/i.test(m)) return 'Wrong email or password.';
+  if (/Email not confirmed/i.test(m)) return 'Please confirm your email first (check your inbox).';
+  return m;
+}
+
+/* ---------------- start ---------------- */
+async function start() {
+  if (!cfg.SUPABASE_URL || cfg.SUPABASE_URL.startsWith('PASTE')) return renderNotConfigured();
+  sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'PASSWORD_RECOVERY') return renderNewPassword();
+    if (event === 'SIGNED_OUT') { me = null; renderAuth('login'); }
+  });
+  const { data } = await sb.auth.getSession();
+  if (data.session) await loadMe(data.session.user); else renderAuth(location.hash === '#signup' ? 'signup' : 'login');
+}
+
+function renderNotConfigured() {
+  app.innerHTML = `<div class="card narrow"><h2>Almost there</h2>
+    <p>SkillTrack is not connected to its database yet.</p>
+    <p class="muted small">Open <code>config.js</code> and paste your Supabase Project URL and anon public key, then upload it again.</p></div>`;
+}
+
+/* ---------------- auth screens ---------------- */
+function renderAuth(tab) {
+  $('#who').innerHTML = '';
+  const t = (id, label) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${label}</button>`;
+  app.innerHTML = `<div class="card narrow">
+    <h1>Welcome to SkillTrack</h1>
+    <p class="muted small">Training and compliance tracking for your company.</p>
+    <div class="tabs">${t('login', 'Log in')}${t('signup', 'Create account')}${t('forgot', 'Forgot password')}</div>
+    <form id="authForm">
+      <label for="email">Work email</label><input id="email" type="email" required autocomplete="email">
+      ${tab !== 'forgot' ? `<label for="pw">Password</label><input id="pw" type="password" required minlength="8" autocomplete="${tab === 'signup' ? 'new-password' : 'current-password'}">` : ''}
+      ${tab === 'signup' ? `<p class="muted small">Your HR admin must add your email to SkillTrack before you can create an account.</p>` : ''}
+      <div class="row" style="margin-top:16px"><button id="go">${tab === 'login' ? 'Log in' : tab === 'signup' ? 'Create account' : 'Send reset link'}</button></div>
+      <div id="authMsg"></div>
+    </form></div>`;
+  app.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => renderAuth(b.dataset.tab));
+  $('#authForm').onsubmit = async e => {
+    e.preventDefault();
+    const email = $('#email').value.trim(), pw = $('#pw')?.value, btn = $('#go'), msg = $('#authMsg');
+    btn.disabled = true; msg.innerHTML = '';
+    try {
+      if (tab === 'login') {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password: pw });
+        if (error) throw error;
+        await loadMe(data.user);
+      } else if (tab === 'signup') {
+        const { data: ok, error: e1 } = await sb.rpc('can_sign_up', { p_email: email });
+        if (e1) throw e1;
+        if (!ok) throw new Error('This email has not been added by your HR admin yet.');
+        const { data, error } = await sb.auth.signUp({ email, password: pw, options: { emailRedirectTo: SITE } });
+        if (error) throw error;
+        if (data.session) await loadMe(data.user);
+        else msg.innerHTML = `<div class="msg ok">Account created. Check your inbox to confirm your email, then log in.</div>`;
+      } else {
+        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: SITE });
+        if (error) throw error;
+        msg.innerHTML = `<div class="msg ok">If this email is registered, a reset link is on its way.</div>`;
+      }
+    } catch (err) { msg.innerHTML = `<div class="msg err">${esc(friendly(err))}</div>`; }
+    btn.disabled = false;
+  };
+}
+
+function renderNewPassword() {
+  app.innerHTML = `<div class="card narrow"><h2>Set a new password</h2>
+    <form id="npForm"><label for="np">New password</label><input id="np" type="password" minlength="8" required>
+    <div class="row" style="margin-top:16px"><button>Save password</button></div><div id="npMsg"></div></form></div>`;
+  $('#npForm').onsubmit = async e => {
+    e.preventDefault();
+    const { data, error } = await sb.auth.updateUser({ password: $('#np').value });
+    if (error) return $('#npMsg').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+    toast('Password updated.'); await loadMe(data.user);
+  };
+}
+
+/* ---------------- who am I ---------------- */
+async function loadMe(user) {
+  const [{ data: isSuper }, { data: member }] = await Promise.all([
+    sb.rpc('is_super_admin'),
+    sb.from('members').select('*, companies(name, status)').eq('user_id', user.id).maybeSingle()
+  ]);
+  me = { user, isSuper: !!isSuper, member, company: member?.companies || null };
+  const roleLabel = me.isSuper ? 'Super Admin' : ROLES[member?.role] || 'No access';
+  $('#who').innerHTML = `<span>${esc(member?.full_name || user.email)} · ${esc(roleLabel)}${me.company ? ' · ' + esc(me.company.name) : ''}</span>
+    <button class="sec" id="logout">Log out</button>`;
+  $('#logout').onclick = () => sb.auth.signOut();
+  if (me.isSuper) return renderCompanies();
+  if (!member || !member.active) {
+    app.innerHTML = `<div class="card narrow"><h2>No access</h2><p class="muted">Your account is not active in any company. Please contact your HR admin.</p></div>`;
+    return;
+  }
+  if (member.role === 'org_admin') return renderEmployees(member.company_id, me.company?.name);
+  if (member.role === 'manager') return renderTeam();
+  renderLearnerHome();
+}
+
+/* ---------------- Super Admin: companies ---------------- */
+async function renderCompanies() {
+  view = 'companies';
+  app.innerHTML = `<h1>Companies</h1><p class="muted">Create client companies and their first HR admin.</p><div id="coList" class="card">Loading…</div>
+  <div class="card"><h2>Add a company</h2>
+    <form id="coForm"><div class="grid3">
+      <div><label>Company name</label><input id="coName" required></div>
+      <div><label>Plan</label><select id="coPlan"><option value="pilot">Pilot (free)</option><option value="starter">Starter</option><option value="growth">Growth</option></select></div>
+      <div><label>Max users</label><input id="coMax" type="number" min="1" value="100" required></div>
+      <div><label>HR admin name</label><input id="adName" required></div>
+      <div><label>HR admin email</label><input id="adEmail" type="email" required></div>
+    </div><div class="row" style="margin-top:16px"><button id="coGo">Create company</button></div><div id="coMsg"></div></form></div>`;
+  $('#coForm').onsubmit = async e => {
+    e.preventDefault(); const btn = $('#coGo'); btn.disabled = true; $('#coMsg').innerHTML = '';
+    try {
+      const { data: co, error } = await sb.from('companies')
+        .insert({ name: $('#coName').value.trim(), plan: $('#coPlan').value, max_users: +$('#coMax').value }).select().single();
+      if (error) throw error;
+      const { error: e2 } = await sb.from('members').insert({ company_id: co.id, full_name: $('#adName').value.trim(), email: $('#adEmail').value.trim().toLowerCase(), role: 'org_admin' });
+      if (e2) { await sb.from('companies').delete().eq('id', co.id); throw e2; }
+      $('#coMsg').innerHTML = `<div class="msg ok">${esc(co.name)} created. Ask the HR admin to open <b>${esc(SITE)}</b> and choose "Create account".</div>`;
+      e.target.reset(); loadCompanies();
+    } catch (err) { $('#coMsg').innerHTML = `<div class="msg err">${esc(friendly(err))}</div>`; }
+    btn.disabled = false;
+  };
+  loadCompanies();
+}
+async function loadCompanies() {
+  const [{ data: cos, error }, { data: mem }] = await Promise.all([
+    sb.from('companies').select('*').order('created_at', { ascending: false }),
+    sb.from('members').select('company_id, active, user_id')
+  ]);
+  if (error) return $('#coList').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+  if (!cos.length) return $('#coList').innerHTML = `<p class="muted">No companies yet. Add your first one below.</p>`;
+  const count = id => (mem || []).filter(m => m.company_id === id && m.active);
+  $('#coList').innerHTML = `<div class="tbl"><table><thead><tr><th>Company</th><th>Plan</th><th>Users</th><th>Joined</th><th>Status</th><th></th></tr></thead><tbody>
+    ${cos.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.plan)}</td><td>${count(c.id).length} / ${c.max_users}</td>
+      <td>${count(c.id).filter(m => m.user_id).length}</td>
+      <td><span class="tag ${c.status === 'active' ? 'ok' : 'warn'}">${esc(c.status)}</span></td>
+      <td><button class="link" data-open="${c.id}" data-name="${esc(c.name)}">Manage employees</button>
+          <button class="link" data-toggle="${c.id}" data-status="${c.status}">${c.status === 'active' ? 'Pause' : 'Activate'}</button></td></tr>`).join('')}
+    </tbody></table></div>`;
+  $('#coList').querySelectorAll('[data-open]').forEach(b => b.onclick = () => renderEmployees(b.dataset.open, b.dataset.name, true));
+  $('#coList').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+    const { error } = await sb.from('companies').update({ status: b.dataset.status === 'active' ? 'paused' : 'active' }).eq('id', b.dataset.toggle);
+    if (error) return toast(friendly(error)); loadCompanies();
+  });
+}
+
+/* ---------------- Org Admin: employees ---------------- */
+let emp = { companyId: null, rows: [], q: '', dept: '', status: '' };
+
+function renderEmployees(companyId, companyName, fromSuper = false) {
+  view = 'employees'; emp = { companyId, rows: [], q: '', dept: '', status: '' };
+  app.innerHTML = `
+    ${fromSuper ? `<button class="link" id="back">← All companies</button>` : ''}
+    <h1>${esc(companyName || 'Your company')}</h1><p class="muted">Add your employees. Each person creates their own password with the email you add here.</p>
+    <div class="nav"><button class="on">Employees</button><button disabled title="Coming in Week 2">Courses (soon)</button><button disabled title="Coming in Week 4">Reports (soon)</button></div>
+    <div id="stats" class="grid" style="margin-top:16px"></div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Employees</h2>
+        <div class="row"><button class="sec" id="copyLink">Copy sign-up link</button></div></div>
+      <div class="grid3" style="margin-top:12px">
+        <input id="fq" placeholder="Search name or email">
+        <select id="fd"><option value="">All departments</option></select>
+        <select id="fs"><option value="">All statuses</option><option>Joined</option><option>Invited</option><option>Inactive</option></select>
+      </div>
+      <div id="empList" class="tbl" style="margin-top:12px">Loading…</div>
+    </div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+      <div class="card"><h2>Add one employee</h2>
+        <form id="addForm">
+          <label>Full name</label><input id="aName" required>
+          <label>Work email</label><input id="aEmail" type="email" required>
+          <label>Department</label><input id="aDept" placeholder="e.g. Sales">
+          <label>Role</label><select id="aRole"><option value="learner">Learner</option><option value="manager">Manager</option><option value="org_admin">Org Admin</option></select>
+          <label>Manager's email (optional)</label><input id="aMgr" type="email">
+          <div class="row" style="margin-top:16px"><button id="aGo">Add employee</button></div><div id="aMsg"></div>
+        </form></div>
+      <div class="card"><h2>Upload many (CSV)</h2>
+        <p class="muted small">Columns: <code>full_name, email, department, role, manager_email</code>. Role can be learner, manager or org_admin (blank = learner).</p>
+        <div class="row"><button class="sec" id="tpl">Download template</button></div>
+        <label for="csv">CSV file</label><input id="csv" type="file" accept=".csv">
+        <div id="csvOut"></div>
+      </div>
+    </div>`;
+  if (fromSuper) $('#back').onclick = renderCompanies;
+  $('#copyLink').onclick = async () => {
+    const text = `You've been added to SkillTrack. Open ${SITE}#signup and create your account with your work email.`;
+    try { await navigator.clipboard.writeText(text); toast('Invitation message copied. Paste it into an email or chat.'); }
+    catch { prompt('Copy this message:', text); }
+  };
+  $('#fq').oninput = e => { emp.q = e.target.value.toLowerCase(); drawEmployees(); };
+  $('#fd').onchange = e => { emp.dept = e.target.value; drawEmployees(); };
+  $('#fs').onchange = e => { emp.status = e.target.value; drawEmployees(); };
+  $('#addForm').onsubmit = async e => {
+    e.preventDefault(); const btn = $('#aGo'); btn.disabled = true; $('#aMsg').innerHTML = '';
+    const row = cleanRow({ full_name: $('#aName').value, email: $('#aEmail').value, department: $('#aDept').value, role: $('#aRole').value, manager_email: $('#aMgr').value });
+    const { error } = await sb.from('members').insert({ ...row, company_id: emp.companyId });
+    if (error) $('#aMsg').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+    else { $('#aMsg').innerHTML = `<div class="msg ok">${esc(row.full_name)} added. Share the sign-up link with them.</div>`; e.target.reset(); loadEmployees(); }
+    btn.disabled = false;
+  };
+  $('#tpl').onclick = () => download('skilltrack-employees-template.csv',
+    'full_name,email,department,role,manager_email\nPriya Nair,priya@yourcompany.com,Sales,manager,\nRahul Verma,rahul@yourcompany.com,Sales,learner,priya@yourcompany.com\n');
+  $('#csv').onchange = e => e.target.files[0] && e.target.files[0].text().then(previewCsv);
+  loadEmployees();
+}
+
+async function loadEmployees() {
+  const { data, error } = await sb.from('members').select('*').eq('company_id', emp.companyId).order('full_name');
+  if (error) return $('#empList').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+  emp.rows = data;
+  const depts = [...new Set(data.map(r => r.department).filter(Boolean))].sort();
+  $('#fd').innerHTML = `<option value="">All departments</option>` + depts.map(d => `<option ${d === emp.dept ? 'selected' : ''}>${esc(d)}</option>`).join('');
+  const active = data.filter(r => r.active), joined = active.filter(r => r.user_id);
+  $('#stats').innerHTML = `
+    <div class="stat"><b>${active.length}</b><span class="muted small">Active employees</span></div>
+    <div class="stat"><b>${joined.length}</b><span class="muted small">Joined (account created)</span></div>
+    <div class="stat"><b>${active.length - joined.length}</b><span class="muted small">Invited, not joined yet</span></div>
+    <div class="stat"><b>${depts.length}</b><span class="muted small">Departments</span></div>`;
+  drawEmployees();
+}
+const statusOf = r => !r.active ? 'Inactive' : r.user_id ? 'Joined' : 'Invited';
+
+function drawEmployees() {
+  const rows = emp.rows.filter(r =>
+    (!emp.q || r.full_name.toLowerCase().includes(emp.q) || r.email.toLowerCase().includes(emp.q)) &&
+    (!emp.dept || r.department === emp.dept) && (!emp.status || statusOf(r) === emp.status));
+  const myId = me.member?.id;
+  $('#empList').innerHTML = !emp.rows.length ? `<p class="muted">No employees yet. Add one or upload a CSV below.</p>` :
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Role</th><th>Manager</th><th>Status</th><th></th></tr></thead><tbody>
+    ${rows.map(r => {
+      const st = statusOf(r), cls = st === 'Joined' ? 'ok' : st === 'Invited' ? 'warn' : 'bad';
+      const self = r.id === myId;
+      return `<tr><td><b>${esc(r.full_name)}</b></td><td>${esc(r.email)}</td><td>${esc(r.department || '–')}</td>
+        <td>${self ? esc(ROLES[r.role]) : `<select data-role="${r.id}">${Object.entries(ROLES).map(([k, v]) => `<option value="${k}" ${k === r.role ? 'selected' : ''}>${v}</option>`).join('')}</select>`}</td>
+        <td>${esc(r.manager_email || '–')}</td><td><span class="tag ${cls}">${st}</span></td>
+        <td>${self ? '<span class="muted small">You</span>' : `<button class="link" data-act="${r.id}" data-on="${r.active}">${r.active ? 'Deactivate' : 'Reactivate'}</button>`}</td></tr>`;
+    }).join('') || `<tr><td colspan="7" class="muted">No employees match these filters.</td></tr>`}
+    </tbody></table>`;
+  $('#empList').querySelectorAll('[data-role]').forEach(s => s.onchange = async () => {
+    const { error } = await sb.from('members').update({ role: s.value }).eq('id', s.dataset.role);
+    toast(error ? friendly(error) : 'Role updated.'); loadEmployees();
+  });
+  $('#empList').querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+    const on = b.dataset.on === 'true';
+    if (on && !confirm('Deactivate this employee? They will lose access, but their training history is kept.')) return;
+    const { error } = await sb.from('members').update({ active: !on }).eq('id', b.dataset.act);
+    toast(error ? friendly(error) : on ? 'Employee deactivated.' : 'Employee reactivated.'); loadEmployees();
+  });
+}
+
+/* ---------------- CSV import ---------------- */
+function parseCSV(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(v => v.trim()));
+}
+function cleanRow(r) {
+  const key = (r.role || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  const role = { '': 'learner', learner: 'learner', employee: 'learner', manager: 'manager', orgadmin: 'org_admin', admin: 'org_admin', hr: 'org_admin', hradmin: 'org_admin' }[key] ?? key;
+  return {
+    full_name: (r.full_name || '').trim(), email: (r.email || '').trim().toLowerCase(),
+    department: (r.department || '').trim() || null, role,
+    manager_email: (r.manager_email || '').trim().toLowerCase() || null
+  };
+}
+let pending = [];
+function previewCsv(text) {
+  const out = $('#csvOut'); pending = [];
+  const rows = parseCSV(text.replace(/^﻿/, ''));
+  if (rows.length < 2) return out.innerHTML = `<div class="msg err">The file is empty.</div>`;
+  const head = rows.shift().map(h => h.trim().toLowerCase().replace(/\s+/g, '_'));
+  if (!head.includes('email') || !head.includes('full_name')) return out.innerHTML = `<div class="msg err">The file needs at least the columns full_name and email. Use the template.</div>`;
+  const existing = new Set(emp.rows.map(r => r.email.toLowerCase())), seen = new Set(), problems = [];
+  rows.forEach((cells, i) => {
+    const o = {}; head.forEach((h, j) => o[h] = cells[j] ?? '');
+    const r = cleanRow(o), line = i + 2;
+    if (!r.full_name) problems.push(`Row ${line}: name is missing`);
+    else if (!EMAIL_RE.test(r.email)) problems.push(`Row ${line}: "${r.email}" is not a valid email`);
+    else if (!ROLES[r.role]) problems.push(`Row ${line}: role "${r.role}" is not valid`);
+    else if (existing.has(r.email)) problems.push(`Row ${line}: ${r.email} already exists`);
+    else if (seen.has(r.email)) problems.push(`Row ${line}: ${r.email} appears twice in the file`);
+    else { seen.add(r.email); pending.push(r); }
+  });
+  out.innerHTML = `<div class="msg info"><b>${pending.length}</b> employees ready to import${problems.length ? `, <b>${problems.length}</b> rows skipped` : ''}.</div>
+    ${problems.length ? `<details style="margin-top:8px"><summary class="small">See skipped rows</summary><ul class="small">${problems.slice(0, 50).map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
+    ${pending.length ? `<div class="row" style="margin-top:12px"><button id="doImport">Import ${pending.length} employees</button></div>` : ''}`;
+  if (pending.length) $('#doImport').onclick = runImport;
+}
+async function runImport() {
+  const btn = $('#doImport'); btn.disabled = true; let ok = 0; const fails = [];
+  for (let i = 0; i < pending.length; i++) {
+    btn.textContent = `Importing ${i + 1} of ${pending.length}…`;
+    const r = pending[i];
+    const { error } = await sb.from('members').insert({ ...r, company_id: emp.companyId });
+    if (error) { fails.push(`${r.email}: ${friendly(error)}`); if (/limit reached/i.test(error.message)) break; } else ok++;
+  }
+  $('#csvOut').innerHTML = `<div class="msg ${fails.length ? 'err' : 'ok'}">${ok} employees imported.${fails.length ? ` ${fails.length} failed.` : ''}</div>
+    ${fails.length ? `<ul class="small">${fails.slice(0, 50).map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}`;
+  $('#csv').value = ''; pending = []; loadEmployees();
+}
+function download(name, text) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; a.click();
+}
+
+/* ---------------- Manager and Learner ---------------- */
+async function renderTeam() {
+  view = 'team';
+  const myEmail = me.member.email.toLowerCase();
+  const { data, error } = await sb.from('members').select('*').eq('company_id', me.member.company_id).eq('manager_email', myEmail).order('full_name');
+  app.innerHTML = `<h1>My team</h1><p class="muted">People who report to you. Training progress will appear here once courses are live.</p>
+    <div class="card tbl">${error ? `<div class="msg err">${esc(friendly(error))}</div>` : !data.length ? `<p class="muted">Nobody is linked to you as their manager yet. Your HR admin sets this.</p>` :
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th></tr></thead><tbody>${data.map(r => `<tr><td>${esc(r.full_name)}</td><td>${esc(r.email)}</td><td>${esc(r.department || '–')}</td><td>${statusOf(r)}</td></tr>`).join('')}</tbody></table>`}</div>`;
+}
+function renderLearnerHome() {
+  view = 'learner';
+  app.innerHTML = `<h1>Hi ${esc(me.member.full_name.split(' ')[0])} 👋</h1><p class="muted">Welcome to ${esc(me.company?.name || 'SkillTrack')}.</p>
+    <div class="card"><h2>My courses</h2><p class="muted">You have no courses assigned yet. When your HR team assigns training, it will appear here with its due date.</p></div>`;
+}
+
+start();

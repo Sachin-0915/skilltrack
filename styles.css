@@ -42,3 +42,27 @@ td select{width:auto;padding:5px 8px}
 .msg.err{background:var(--bad-soft);color:var(--bad)} .msg.ok{background:var(--ok-soft);color:var(--ok)} .msg.info{background:var(--brand-soft);color:var(--brand)}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;max-width:90vw;z-index:9}
 code{background:var(--brand-soft);padding:1px 6px;border-radius:5px;font-size:13px}
+textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;resize:vertical}
+h3{font-size:14px}
+.bad{color:var(--bad)}
+.qbox{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-top:10px}
+fieldset.qbox{margin:12px 0 0}
+.qbox ol{margin:8px 0 0;padding-left:22px} .qbox li.right{color:var(--ok);font-weight:600}
+.opt{display:flex;gap:8px;align-items:center;font-weight:400;font-size:15px;margin:8px 0;cursor:pointer}
+.pick{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin-top:6px}
+.pickrow{display:flex;gap:8px;align-items:center;font-weight:400;margin:6px 0}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.cards .card{margin-top:0}
+.bar{height:8px;background:var(--brand-soft);border-radius:99px;overflow:hidden}.bar div{height:100%;background:var(--brand);border-radius:99px}
+.player{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+@media (max-width:760px){.player{grid-template-columns:1fr}}
+.player .card{margin-top:0}.side{padding:12px}
+.lesson{display:flex;gap:10px;align-items:center;width:100%;text-align:left;background:none;color:var(--text);font-weight:500;padding:9px 8px;margin-top:4px}
+.lesson.on{background:var(--brand-soft);color:var(--brand)} .lesson:disabled{opacity:.45;cursor:not-allowed}
+.tick{flex:none;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:99px;border:1px solid var(--line);font-size:12px}
+.tick.done{background:var(--ok);border-color:var(--ok);color:#fff}
+.lesson-body{font-size:16px;line-height:1.7}
+.video,.pdf{position:relative;width:100%;border-radius:10px;overflow:hidden;background:#000}
+.video{aspect-ratio:16/9}.pdf{height:70vh;background:var(--bg)}
+.video iframe,.pdf iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.tag:not(.ok):not(.warn):not(.bad){background:var(--line);color:var(--muted)}

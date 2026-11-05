@@ -31,7 +31,7 @@ async function start() {
   sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') return renderNewPassword();
-    if (event === 'SIGNED_OUT') { me = null; renderAuth('login'); }
+    if (event === 'SIGNED_OUT') { me = null; $('#toast').hidden = true; renderAuth('login'); }
   });
   const { data } = await sb.auth.getSession();
   if (data.session) await loadMe(data.session.user); else renderAuth(location.hash === '#signup' ? 'signup' : 'login');
@@ -114,9 +114,25 @@ async function loadMe(user) {
     app.innerHTML = `<div class="card narrow"><h2>No access</h2><p class="muted">Your account is not active in any company. Please contact your HR admin.</p></div>`;
     return;
   }
-  if (member.role === 'org_admin') return renderEmployees(member.company_id, me.company?.name);
-  if (member.role === 'manager') return renderTeam();
-  renderLearnerHome();
+  const ctx = { companyId: member.company_id, companyName: me.company?.name, fromSuper: false };
+  if (member.role === 'org_admin') return renderEmployees(ctx.companyId, ctx.companyName);
+  if (member.role === 'manager') return renderTeam(ctx);
+  renderMyLearning(ctx);
+}
+
+/* ---------------- navigation tabs ---------------- */
+function adminNav(active, ctx) {
+  const tabs = [];
+  if (me.isSuper || me.member?.role === 'org_admin') tabs.push(['employees', 'Employees'], ['courses', 'Courses']);
+  if (me.member?.role === 'manager') tabs.push(['team', 'My team']);
+  if (me.member && !ctx.fromSuper) tabs.push(['learning', 'My learning']);
+  return `<div class="nav">${tabs.map(([k, v]) => `<button data-nav="${k}" class="${k === active ? 'on' : ''}">${v}</button>`).join('')}
+    ${me.isSuper || me.member?.role === 'org_admin' ? '<button disabled title="Coming in Week 4">Reports (soon)</button>' : ''}</div>`;
+}
+function wireNav(ctx) {
+  const go = { employees: () => renderEmployees(ctx.companyId, ctx.companyName, ctx.fromSuper), courses: () => renderCourses(ctx),
+               team: () => renderTeam(ctx), learning: () => renderMyLearning(ctx) };
+  app.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => go[b.dataset.nav]());
 }
 
 /* ---------------- Super Admin: companies ---------------- */
@@ -173,10 +189,11 @@ let emp = { companyId: null, rows: [], q: '', dept: '', status: '' };
 
 function renderEmployees(companyId, companyName, fromSuper = false) {
   view = 'employees'; emp = { companyId, rows: [], q: '', dept: '', status: '' };
+  const ctx = { companyId, companyName, fromSuper };
   app.innerHTML = `
     ${fromSuper ? `<button class="link" id="back">← All companies</button>` : ''}
     <h1>${esc(companyName || 'Your company')}</h1><p class="muted">Add your employees. Each person creates their own password with the email you add here.</p>
-    <div class="nav"><button class="on">Employees</button><button disabled title="Coming in Week 2">Courses (soon)</button><button disabled title="Coming in Week 4">Reports (soon)</button></div>
+    ${adminNav('employees', ctx)}
     <div id="stats" class="grid" style="margin-top:16px"></div>
     <div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">Employees</h2>
@@ -205,6 +222,7 @@ function renderEmployees(companyId, companyName, fromSuper = false) {
         <div id="csvOut"></div>
       </div>
     </div>`;
+  wireNav(ctx);
   if (fromSuper) $('#back').onclick = renderCompanies;
   $('#copyLink').onclick = async () => {
     const text = `You've been added to SkillTrack. Open ${SITE}#signup and create your account with your work email.`;
@@ -335,18 +353,22 @@ function download(name, text) {
 }
 
 /* ---------------- Manager and Learner ---------------- */
-async function renderTeam() {
+async function renderTeam(ctx) {
   view = 'team';
   const myEmail = me.member.email.toLowerCase();
-  const { data, error } = await sb.from('members').select('*').eq('company_id', me.member.company_id).eq('manager_email', myEmail).order('full_name');
-  app.innerHTML = `<h1>My team</h1><p class="muted">People who report to you. Training progress will appear here once courses are live.</p>
-    <div class="card tbl">${error ? `<div class="msg err">${esc(friendly(error))}</div>` : !data.length ? `<p class="muted">Nobody is linked to you as their manager yet. Your HR admin sets this.</p>` :
-    `<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Status</th></tr></thead><tbody>${data.map(r => `<tr><td>${esc(r.full_name)}</td><td>${esc(r.email)}</td><td>${esc(r.department || '–')}</td><td>${statusOf(r)}</td></tr>`).join('')}</tbody></table>`}</div>`;
+  const [{ data, error }, { data: asg }] = await Promise.all([
+    sb.from('members').select('*').eq('company_id', me.member.company_id).eq('manager_email', myEmail).order('full_name'),
+    sb.from('assignments').select('*, courses(title)').eq('company_id', me.member.company_id)
+  ]);
+  const team = data || [], ids = new Set(team.map(r => r.id));
+  const work = (asg || []).filter(a => ids.has(a.member_id) && a.courses);
+  const who = id => team.find(r => r.id === id)?.full_name || '';
+  app.innerHTML = `<h1>My team</h1><p class="muted">People who report to you and their training.</p>${adminNav('team', ctx)}
+    <div class="card tbl"><h2>Team members</h2>${error ? `<div class="msg err">${esc(friendly(error))}</div>` : !team.length ? `<p class="muted">Nobody is linked to you as their manager yet. Your HR admin sets this.</p>` :
+    `<table><thead><tr><th>Name</th><th>Email</th><th>Department</th><th>Account</th></tr></thead><tbody>${team.map(r => `<tr><td>${esc(r.full_name)}</td><td>${esc(r.email)}</td><td>${esc(r.department || '–')}</td><td>${statusOf(r)}</td></tr>`).join('')}</tbody></table>`}</div>
+    <div class="card tbl"><h2>Team training</h2>${!work.length ? '<p class="muted">No training assigned to your team yet.</p>' :
+    `<table><thead><tr><th>Name</th><th>Course</th><th>Status</th><th>Score</th><th>Due</th></tr></thead><tbody>
+    ${work.sort((a, b) => assignmentStatus(a).text === 'Overdue' ? -1 : 1).map(a => { const s = assignmentStatus(a);
+      return `<tr><td>${esc(who(a.member_id))}</td><td>${esc(a.courses.title)}</td><td><span class="tag ${s.cls}">${s.text}</span></td><td>${a.best_score ?? '–'}${a.best_score != null ? '%' : ''}</td><td>${fmtDate(a.due_date)}</td></tr>`; }).join('')}</tbody></table>`}</div>`;
+  wireNav(ctx);
 }
-function renderLearnerHome() {
-  view = 'learner';
-  app.innerHTML = `<h1>Hi ${esc(me.member.full_name.split(' ')[0])} 👋</h1><p class="muted">Welcome to ${esc(me.company?.name || 'SkillTrack')}.</p>
-    <div class="card"><h2>My courses</h2><p class="muted">You have no courses assigned yet. When your HR team assigns training, it will appear here with its due date.</p></div>`;
-}
-
-start();

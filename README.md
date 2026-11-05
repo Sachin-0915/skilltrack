@@ -13,7 +13,21 @@ Simple training and compliance tracking for growing companies: assign mandatory 
 - Only invited emails can create an account
 - Each company's data is isolated by database security rules (Row Level Security)
 
-Coming next: courses and quizzes (Weeks 2–3), reminders and reports (Week 4), AI course generator (Week 5).
+## Week 2 features (live)
+- **Course builder** for HR: details, pass mark, quiz attempts, lessons (text, YouTube/Vimeo video, PDF link) with reordering, and a multiple-choice final quiz
+- Publish / unpublish, delete
+- **Assign** a course to everyone, a department or selected people, with a due date
+- **Assigned learners** table: status (including Overdue), lesson progress, best score, attempts, reset attempts, remove
+- **My learning** for every employee: to-do and completed courses, progress bars, due dates
+- **Course player**: lessons in order, then the quiz; quiz is graded on the server so answers are never sent to the browser
+- **Certificate of completion** (print or save as PDF) with a unique certificate number
+- **Manager view** of their team's training
+
+![Course builder](screenshot-course-builder.png)
+![Lesson](screenshot-lesson.png)
+![Certificate](screenshot-certificate.png)
+
+Coming next: email reminders and reports (Week 4), AI course generator (Week 5).
 
 ## One-time setup
 
@@ -21,6 +35,7 @@ Coming next: courses and quizzes (Weeks 2–3), reminders and reports (Week 4), 
 1. Open your Supabase project → **SQL Editor** → **New query**.
 2. Open `setup.sql`, find `YOUR_EMAIL_HERE` at the bottom and replace it with **your** email (this becomes the Super Admin).
 3. Paste the whole file into the editor and click **Run**. You should see "Success. No rows returned".
+4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**.
 
 ### 2. Login settings (Supabase)
 1. **Authentication → URL Configuration**

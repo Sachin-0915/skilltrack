@@ -135,5 +135,5 @@ grant  select, insert, update, delete on public.companies to authenticated;
 grant  execute on function public.can_sign_up(text) to anon, authenticated;
 
 -- ---------- Make yourself Super Admin ----------
-insert into public.super_admins (email) values ('sachin.d0915@gmail.com')
+insert into public.super_admins (email) values ('YOUR_EMAIL_HERE')
 on conflict do nothing;

@@ -55,11 +55,13 @@ function drawReports() {
   const insights = [];
   if (rows.length) {
     insights.push(`Overall completion is <b>${rate(rows)}%</b> across ${new Set(rows.map(r => r.member_id)).size} people and ${rows.length} assignments.`);
-    if (byDept.length > 1) insights.push(`<b>${esc(byDept.at(-1).name)}</b> has the lowest completion (${byDept.at(-1).rate}%), compared with <b>${esc(byDept[0].name)}</b> at ${byDept[0].rate}%.`);
+    const realDepts = byDept.filter(d => d.name !== 'No department');
+    if (realDepts.length > 1) insights.push(`<b>${esc(realDepts.at(-1).name)}</b> has the lowest completion (${realDepts.at(-1).rate}%), compared with <b>${esc(realDepts[0].name)}</b> at ${realDepts[0].rate}%.`);
     if (overdue.length) { const worst = [...byCourse].sort((a, b) => b.late - a.late)[0]; insights.push(`<b>${overdue.length}</b> ${overdue.length === 1 ? 'assignment is' : 'assignments are'} overdue${overdue.length === 1 ? ` in "${esc(worst.name)}"` : worst.late ? `, most of them in "${esc(worst.name)}" (${worst.late})` : ''}.`); }
     const high = new Set(risk.filter(r => r.risk === 'High').map(r => r.member_id)).size;
     if (high) insights.push(`Suggested action: send a reminder to the <b>${high}</b> people with high-risk training this week.`);
-    else insights.push('No high-risk training right now. Good work!');
+    const med = new Set(risk.filter(r => r.risk === 'Medium').map(r => r.member_id)).size;
+    if (!high) insights.push(med ? `No high-risk training right now, but <b>${med}</b> ${med === 1 ? 'person is' : 'people are'} at medium risk. A gentle reminder now prevents overdue training.` : 'No high-risk training right now. Good work!');
   }
 
   $('#repBody').outerHTML = `<div id="repBody">

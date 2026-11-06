@@ -37,7 +37,14 @@ Simple training and compliance tracking for growing companies: assign mandatory 
 
 ![Reports](screenshot-reports.png)
 
-Coming next: automatic email reminders, AI course generator (Week 5).
+## Week 5 features (live)
+- **Create a course with AI**: HR types a topic (and optionally pastes their own policy), picks audience, level, number of lessons and questions
+- Claude drafts the lessons and the quiz as structured data; with source material it uses only that content
+- **No API key yet?** "Use a free AI chat" gives HR a ready prompt to paste into any AI chat (e.g. the claude.ai free plan) and reads the answer back in, with the same checks
+- HR reviews a preview, then saves it as a **draft** course to edit and publish (nothing is published automatically)
+- Runs in a Supabase Edge Function (`supabase/functions/ai-course`), so the AI key never reaches the browser, and only HR admins can use it
+
+Coming next: automatic email reminders.
 
 ## One-time setup
 
@@ -53,16 +60,21 @@ Coming next: automatic email reminders, AI course generator (Week 5).
    - Redirect URLs: add the same address.
 2. Supabase's built-in email sends only a few emails per hour. That is fine for testing. Before real clients, connect a proper email service (planned for Week 4).
 
-### 3. Connect the app
+### 3. AI course generator (optional)
+1. Create an API key at console.anthropic.com (add a little credit first).
+2. Supabase → **Edge Functions → Secrets** → add `ANTHROPIC_API_KEY` with that key.
+3. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `ai-course`, paste `supabase/functions/ai-course/index.ts`, Deploy.
+
+### 4. Connect the app
 Open `config.js` and paste your **Project URL** and **anon public** key from Supabase → Project Settings → API.
 Never paste the `service_role` key anywhere in this project.
 
-### 4. Publish (GitHub Pages)
+### 5. Publish (GitHub Pages)
 1. Upload all files to the `skilltrack` repo (Add file → Upload files → drag them in → Commit changes).
 2. Settings → Pages → Branch: `main`, folder `/ (root)` → Save.
 3. Open `https://sachin-0915.github.io/skilltrack/`.
 
-### 5. First login
+### 6. First login
 Click **Create account** with the email you put in `setup.sql`, confirm it from your inbox, then log in. You will see the **Companies** screen.
 
 ## Test checklist

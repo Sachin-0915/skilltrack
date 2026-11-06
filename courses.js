@@ -20,9 +20,15 @@ async function renderCourses(ctx) {
   app.innerHTML = `${ctx.fromSuper ? `<button class="link" id="back">← All companies</button>` : ''}
     <h1>${esc(ctx.companyName || 'Courses')}</h1><p class="muted">Build courses, publish them and assign them with a due date.</p>
     ${adminNav('courses', ctx)}
-    <div class="card"><form id="newCourse" class="row"><input id="ncTitle" placeholder="New course title, e.g. Information Security Awareness" required style="flex:1;min-width:220px"><button>Create course</button></form></div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr))">
+      <div class="card"><h2>Create a course yourself</h2><form id="newCourse"><label>Course title</label><input id="ncTitle" placeholder="e.g. Information Security Awareness" required>
+        <div class="row" style="margin-top:14px"><button>Create course</button></div></form></div>
+      <div class="card ai"><h2>✨ Create a course with AI</h2><p class="muted small" style="margin-top:-6px">Type a topic, or paste your policy, and AI drafts the lessons and quiz. You review everything before publishing.</p>
+        <button id="openAi">Start</button></div></div>
+    <div id="aiPanel"></div>
     <div id="courseList" class="card">Loading…</div>`;
   wireNav(ctx);
+  $('#openAi').onclick = () => renderAiForm(ctx);
   if (ctx.fromSuper) $('#back').onclick = renderCompanies;
   $('#newCourse').onsubmit = async e => {
     e.preventDefault();
@@ -250,4 +256,134 @@ function drawAssigned(reload) {
     if (!confirm('Remove this assignment? The learner\'s progress on this course will be deleted.')) return;
     const { error } = await sb.from('assignments').delete().eq('id', b.dataset.unassign); toast(error ? friendly(error) : 'Assignment removed.'); reload();
   });
+}
+
+/* ---------------- AI course generator (Week 5) ---------------- */
+function renderAiForm(ctx) {
+  const p = $('#aiPanel');
+  p.innerHTML = `<div class="card ai"><div class="row" style="justify-content:space-between"><h2 style="margin:0">✨ Create a course with AI</h2><button class="link" id="aiClose">Close</button></div>
+    <form id="aiForm">
+      <label>Topic</label><input id="aiTopic" placeholder="e.g. POSH awareness for new joiners">
+      <div class="grid3"><div><label>Audience</label><select id="aiAud"><option>All employees</option><option>New joiners</option><option>Managers</option><option>Sales team</option><option>Customer support team</option><option>Engineering team</option></select></div>
+        <div><label>Level</label><select id="aiLvl"><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:10px"><div><label>Lessons</label><select id="aiLes">${[2, 3, 4, 5, 6].map(n => `<option ${n === 4 ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          <div><label>Questions</label><select id="aiQ">${[3, 5, 8, 10].map(n => `<option ${n === 5 ? 'selected' : ''}>${n}</option>`).join('')}</select></div></div></div>
+      <label>Source material (optional but recommended)</label>
+      <textarea id="aiSrc" rows="6" placeholder="Paste your policy, SOP or training notes. The course will then use only this content, so it matches your company's rules."></textarea>
+      <p class="muted small" id="aiCount">0 / 40,000 characters</p>
+      <div class="row"><button id="aiGo">Generate draft</button><button type="button" class="sec" id="aiChat">No AI key? Use a free AI chat</button><span class="muted small" id="aiWait"></span></div></form>
+      <div id="chatFlow"></div></div>`;
+  p.scrollIntoView({ behavior: 'smooth' });
+  $('#aiClose').onclick = () => p.innerHTML = '';
+  $('#aiSrc').oninput = e => $('#aiCount').textContent = `${e.target.value.length.toLocaleString()} / 40,000 characters`;
+  const readForm = () => {
+    const body = { topic: $('#aiTopic').value.trim(), audience: $('#aiAud').value, level: $('#aiLvl').value,
+      lessons: +$('#aiLes').value, questions: +$('#aiQ').value, source: $('#aiSrc').value.trim() };
+    if (!body.topic && !body.source) { toast('Enter a topic or paste some source material.'); return null; }
+    if (body.source.length > 40000) { toast('Source material is too long. Paste at most 40,000 characters.'); return null; }
+    return body;
+  };
+  $('#aiChat').onclick = () => { const body = readForm(); if (body) renderChatFlow(ctx, body); };
+  $('#aiForm').onsubmit = async e => {
+    e.preventDefault();
+    const body = readForm(); if (!body) return;
+    const btn = $('#aiGo'); btn.disabled = true; btn.textContent = 'Generating…';
+    $('#aiWait').textContent = 'This usually takes 20 to 60 seconds.';
+    const { data, error } = await sb.functions.invoke('ai-course', { body });
+    btn.disabled = false; btn.textContent = 'Generate draft'; $('#aiWait').textContent = '';
+    if (error) {
+      let msg = 'Automatic AI is not set up yet. Use "No AI key? Use a free AI chat" instead.';
+      if (error.context?.status !== 404) try { const j = await error.context.json(); if (j.error) msg = j.error; } catch { /* keep the setup message */ }
+      return toast(msg, 7000);
+    }
+    renderAiPreview(ctx, data.course);
+  };
+}
+
+function renderAiPreview(ctx, c) {
+  const p = $('#aiPanel');
+  p.innerHTML = `<div class="card ai"><span class="tag warn">AI draft · review before publishing</span>
+    <h2 style="margin:10px 0 4px">${esc(c.title)}</h2><p class="muted">${esc(c.description)}</p>
+    <p class="small muted">${c.lessons.length} lessons · ${c.questions.length} quiz questions · about ${c.duration_minutes} minutes</p>
+    <h3>Lessons</h3>${c.lessons.map((l, i) => `<details class="qbox"><summary><b>${i + 1}. ${esc(l.title)}</b></summary><div class="lesson-body small">${lessonBody({ type: 'text', content: l.content })}</div></details>`).join('')}
+    <h3 style="margin-top:16px">Quiz</h3>${c.questions.map((q, i) => `<div class="qbox"><b>${i + 1}. ${esc(q.question)}</b><ol type="A" class="small">${q.options.map((o, j) => `<li${j === q.correct ? ' class="right"' : ''}>${esc(o)}${j === q.correct ? ' ✓' : ''}</li>`).join('')}</ol><p class="muted small" style="margin:4px 0 0">${esc(q.explanation || '')}</p></div>`).join('')}
+    <p class="msg info small">AI can make mistakes. Check every lesson and answer against your policy before publishing.</p>
+    <div class="row" style="margin-top:12px"><button id="aiSave">Save as draft course</button><button class="sec" id="aiAgain">Try again</button><button class="link" id="aiDiscard">Discard</button></div></div>`;
+  $('#aiDiscard').onclick = () => p.innerHTML = '';
+  $('#aiAgain').onclick = () => renderAiForm(ctx);
+  $('#aiSave').onclick = async () => {
+    const btn = $('#aiSave'); btn.disabled = true; btn.textContent = 'Saving…';
+    const { data: course, error } = await sb.from('courses').insert({ company_id: ctx.companyId, title: c.title.slice(0, 200),
+      description: c.description, duration_minutes: Math.max(5, Math.min(600, c.duration_minutes || 30)) }).select().single();
+    if (error) { btn.disabled = false; btn.textContent = 'Save as draft course'; return toast(friendly(error)); }
+    const [r1, r2] = await Promise.all([
+      sb.from('lessons').insert(c.lessons.map((l, i) => ({ course_id: course.id, company_id: ctx.companyId, position: i + 1, title: l.title, type: 'text', content: l.content }))),
+      c.questions.length ? sb.from('questions').insert(c.questions.map((q, i) => ({ course_id: course.id, company_id: ctx.companyId, position: i + 1, question: q.question, options: q.options, correct: q.correct, explanation: q.explanation || null }))) : { error: null }
+    ]);
+    if (r1.error || r2.error) toast('The course was saved, but some lessons or questions failed. Please check it.', 6000);
+    else toast('Draft saved. Review it, add videos if you like, then publish.');
+    renderCourseEditor(ctx, course.id);
+  };
+}
+
+/* ---------------- Free option: copy a prompt into any AI chat, paste the answer back ---------------- */
+function chatPrompt(b) {
+  return `Create a workplace training course and reply with ONLY one JSON object, no other text before or after it.
+
+Topic: ${b.topic || '(take it from the source material)'}
+Audience: ${b.audience}
+Level: ${b.level}
+Number of lessons: exactly ${b.lessons}
+Number of quiz questions: exactly ${b.questions}
+
+Use exactly this JSON shape:
+{"title": "...", "description": "one or two sentences", "duration_minutes": 30,
+ "lessons": [{"title": "...", "content": "..."}],
+ "questions": [{"question": "...", "options": ["...", "...", "...", "..."], "correct": 0, "explanation": "..."}]}
+
+Lesson rules: plain text only, no markdown headings or bold. Separate paragraphs with a blank line (\\n\\n inside the JSON string). Short lists may use lines starting with "- ". 150 to 300 words per lesson, practical, with an everyday workplace example.
+Quiz rules: exactly 4 options per question; "correct" is the 0-based index of the right option; vary its position; "explanation" is one sentence.${b.source ? `
+
+Build the course ONLY from the source material below. Do not add facts, numbers or rules that are not in it.
+
+<source_material>
+${b.source}
+</source_material>` : ''}`;
+}
+
+// Same checks the server function applies, so bad data never reaches the database.
+function cleanCourse(c) {
+  if (!c || typeof c !== 'object') throw new Error('That does not look like a course.');
+  const str = v => (typeof v === 'string' ? v.trim() : '');
+  const lessons = (Array.isArray(c.lessons) ? c.lessons : []).map(l => ({ title: str(l?.title).slice(0, 200), content: str(l?.content) })).filter(l => l.title && l.content);
+  const questions = (Array.isArray(c.questions) ? c.questions : []).map(q => ({ question: str(q?.question), options: Array.isArray(q?.options) ? q.options.map(str) : [],
+    correct: Number(q?.correct), explanation: str(q?.explanation) })).filter(q => q.question && q.options.length === 4 && q.options.every(Boolean) && Number.isInteger(q.correct) && q.correct >= 0 && q.correct <= 3);
+  if (!lessons.length) throw new Error('No lessons found in the answer.');
+  return { title: str(c.title) || 'New course', description: str(c.description), duration_minutes: Number(c.duration_minutes) || 30, lessons, questions };
+}
+
+function renderChatFlow(ctx, body) {
+  const box = $('#chatFlow'), prompt = chatPrompt(body);
+  box.innerHTML = `<div class="chatflow">
+    <h3>Step 1 · Copy this prompt into a free AI chat</h3>
+    <p class="muted small">For example <a href="https://claude.ai" target="_blank" rel="noopener">claude.ai</a> (the free plan works). Start a new chat, paste, and send.</p>
+    <textarea id="cfPrompt" rows="6" readonly>${esc(prompt)}</textarea>
+    <div class="row" style="margin-top:8px"><button type="button" class="sec" id="cfCopy">Copy prompt</button></div>
+    <h3 style="margin-top:18px">Step 2 · Paste the AI's full answer here</h3>
+    <textarea id="cfAnswer" rows="6" placeholder='The answer starts with { and ends with }'></textarea>
+    <div class="row" style="margin-top:8px"><button type="button" id="cfPreview">Preview course</button></div></div>`;
+  box.scrollIntoView({ behavior: 'smooth' });
+  $('#cfCopy').onclick = async () => {
+    try { await navigator.clipboard.writeText(prompt); toast('Prompt copied. Paste it into the AI chat.'); }
+    catch { $('#cfPrompt').select(); toast('Press Ctrl + C to copy the selected prompt.'); }
+  };
+  $('#cfPreview').onclick = () => {
+    const raw = $('#cfAnswer').value, a = raw.indexOf('{'), z = raw.lastIndexOf('}');
+    if (a < 0 || z <= a) return toast('Paste the whole answer, from the first { to the last }.', 5000);
+    let course;
+    try { course = cleanCourse(JSON.parse(raw.slice(a, z + 1))); }
+    catch (e) { return toast(`Could not read the answer: ${e.message} Ask the AI to "reply with only the JSON" and paste again.`, 7000); }
+    if (course.questions.length < body.questions) toast(`Note: ${course.questions.length} usable quiz questions were found.`, 5000);
+    renderAiPreview(ctx, course);
+  };
 }

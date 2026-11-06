@@ -70,3 +70,7 @@ fieldset.qbox{margin:12px 0 0}
 .rbar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .rbar>.muted{grid-column:2 / 4;margin-top:-4px}
 ul li{margin:4px 0}
+.card.ai{border-color:var(--brand)}
+details.qbox summary{cursor:pointer}
+details.qbox .lesson-body{margin-top:8px}
+.chatflow{border-top:1px solid var(--line);margin-top:18px;padding-top:6px}.chatflow textarea{font:13px/1.45 ui-monospace,Menlo,Consolas,monospace}

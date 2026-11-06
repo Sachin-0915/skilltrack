@@ -27,7 +27,17 @@ Simple training and compliance tracking for growing companies: assign mandatory 
 ![Lesson](screenshot-lesson.png)
 ![Certificate](screenshot-certificate.png)
 
-Coming next: email reminders and reports (Week 4), AI course generator (Week 5).
+## Week 4 features (live)
+- **Reports** tab for HR: completion rate, overdue count, people at risk, average score
+- Completion by course and by department, filterable
+- **At-risk list** with a plain-English reason (overdue, failed, due soon with little progress, not started)
+- **Email reminder** button: opens HR's email app with the selected learners in BCC and a ready message
+- Export the full report or the at-risk list to CSV
+- More reliable PDF lessons, and tighter database permissions
+
+![Reports](screenshot-reports.png)
+
+Coming next: automatic email reminders, AI course generator (Week 5).
 
 ## One-time setup
 
@@ -35,7 +45,7 @@ Coming next: email reminders and reports (Week 4), AI course generator (Week 5).
 1. Open your Supabase project → **SQL Editor** → **New query**.
 2. Open `setup.sql`, find `YOUR_EMAIL_HERE` at the bottom and replace it with **your** email (this becomes the Super Admin).
 3. Paste the whole file into the editor and click **Run**. You should see "Success. No rows returned".
-4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**.
+4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`.
 
 ### 2. Login settings (Supabase)
 1. **Authentication → URL Configuration**

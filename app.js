@@ -123,14 +123,13 @@ async function loadMe(user) {
 /* ---------------- navigation tabs ---------------- */
 function adminNav(active, ctx) {
   const tabs = [];
-  if (me.isSuper || me.member?.role === 'org_admin') tabs.push(['employees', 'Employees'], ['courses', 'Courses']);
+  if (me.isSuper || me.member?.role === 'org_admin') tabs.push(['employees', 'Employees'], ['courses', 'Courses'], ['reports', 'Reports']);
   if (me.member?.role === 'manager') tabs.push(['team', 'My team']);
   if (me.member && !ctx.fromSuper) tabs.push(['learning', 'My learning']);
-  return `<div class="nav">${tabs.map(([k, v]) => `<button data-nav="${k}" class="${k === active ? 'on' : ''}">${v}</button>`).join('')}
-    ${me.isSuper || me.member?.role === 'org_admin' ? '<button disabled title="Coming in Week 4">Reports (soon)</button>' : ''}</div>`;
+  return `<div class="nav">${tabs.map(([k, v]) => `<button data-nav="${k}" class="${k === active ? 'on' : ''}">${v}</button>`).join('')}</div>`;
 }
 function wireNav(ctx) {
-  const go = { employees: () => renderEmployees(ctx.companyId, ctx.companyName, ctx.fromSuper), courses: () => renderCourses(ctx),
+  const go = { employees: () => renderEmployees(ctx.companyId, ctx.companyName, ctx.fromSuper), courses: () => renderCourses(ctx), reports: () => renderReports(ctx),
                team: () => renderTeam(ctx), learning: () => renderMyLearning(ctx) };
   app.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => go[b.dataset.nav]());
 }

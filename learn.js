@@ -86,8 +86,11 @@ function lessonBody(l) {
     return src ? `<div class="video"><iframe src="${src}" allow="fullscreen; picture-in-picture" allowfullscreen title="${esc(l.title)}"></iframe></div>`
                : `<p><a href="${esc(url)}" target="_blank" rel="noopener">Open the video in a new tab</a></p>`;
   }
-  const gd = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/);
-  const src = gd ? `https://drive.google.com/file/d/${gd[1]}/preview` : url;
+  // Google Drive links use Drive's own viewer; other public PDF links use Google's document viewer,
+  // because many websites refuse to be shown inside another page.
+  const gd = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:export=\w+&)?id=)([\w-]+)/);
+  const src = gd ? `https://drive.google.com/file/d/${gd[1]}/preview`
+    : `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
   return `<div class="pdf"><iframe src="${esc(src)}" title="${esc(l.title)}"></iframe></div>
     <p class="small"><a href="${esc(url)}" target="_blank" rel="noopener">Open the PDF in a new tab</a> if it does not show above.</p>`;
 }

@@ -359,18 +359,20 @@ function cleanCourse(c) {
   const questions = (Array.isArray(c.questions) ? c.questions : []).map(q => ({ question: str(q?.question), options: Array.isArray(q?.options) ? q.options.map(str) : [],
     correct: Number(q?.correct), explanation: str(q?.explanation) })).filter(q => q.question && q.options.length === 4 && q.options.every(Boolean) && Number.isInteger(q.correct) && q.correct >= 0 && q.correct <= 3);
   if (!lessons.length) throw new Error('No lessons found in the answer.');
+  if ([c.title, ...lessons.map(l => l.content)].some(v => str(v) === '...')) throw new Error('The answer still contains the "..." template.');
   return { title: str(c.title) || 'New course', description: str(c.description), duration_minutes: Number(c.duration_minutes) || 30, lessons, questions };
 }
 
 function renderChatFlow(ctx, body) {
   const box = $('#chatFlow'), prompt = chatPrompt(body);
   box.innerHTML = `<div class="chatflow">
-    <h3>Step 1 · Copy this prompt into a free AI chat</h3>
-    <p class="muted small">For example <a href="https://claude.ai" target="_blank" rel="noopener">claude.ai</a> (the free plan works). Start a new chat, paste, and send.</p>
+    <h3>Step 1 · Copy this prompt and send it in a free AI chat</h3>
+    <p class="muted small">Open <a href="https://claude.ai" target="_blank" rel="noopener">claude.ai</a> (the free plan works) in a new tab, start a new chat, paste the prompt and press send. Wait for the AI to finish writing.</p>
     <textarea id="cfPrompt" rows="6" readonly>${esc(prompt)}</textarea>
     <div class="row" style="margin-top:8px"><button type="button" class="sec" id="cfCopy">Copy prompt</button></div>
-    <h3 style="margin-top:18px">Step 2 · Paste the AI's full answer here</h3>
-    <textarea id="cfAnswer" rows="6" placeholder='The answer starts with { and ends with }'></textarea>
+    <h3 style="margin-top:18px">Step 2 · Copy the AI's reply and paste it here</h3>
+    <p class="muted small">Not the prompt: the AI's reply. It contains your course title and lesson text, and starts with <code>{</code>. In claude.ai you can use the copy button under the reply.</p>
+    <textarea id="cfAnswer" rows="6" placeholder="Paste the AI's reply here"></textarea>
     <div class="row" style="margin-top:8px"><button type="button" id="cfPreview">Preview course</button></div></div>`;
   box.scrollIntoView({ behavior: 'smooth' });
   $('#cfCopy').onclick = async () => {
@@ -379,6 +381,8 @@ function renderChatFlow(ctx, body) {
   };
   $('#cfPreview').onclick = () => {
     const raw = $('#cfAnswer').value, a = raw.indexOf('{'), z = raw.lastIndexOf('}');
+    if (raw.includes('reply with ONLY one JSON object') || raw.includes('"title": "...", "description": "one or two sentences"'))
+      return toast('That is the prompt, not the answer. Paste the prompt into the AI chat, send it, then copy the AI\'s reply and paste it here.', 9000);
     if (a < 0 || z <= a) return toast('Paste the whole answer, from the first { to the last }.', 5000);
     let course;
     try { course = cleanCourse(JSON.parse(raw.slice(a, z + 1))); }

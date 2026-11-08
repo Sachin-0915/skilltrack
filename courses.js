@@ -336,6 +336,8 @@ Level: ${b.level}
 Number of lessons: exactly ${b.lessons}
 Number of quiz questions: exactly ${b.questions}
 
+Put the JSON inside a single \`\`\`json code block, using plain straight double quotes.
+
 Use exactly this JSON shape:
 {"title": "...", "description": "one or two sentences", "duration_minutes": 30,
  "lessons": [{"title": "...", "content": "..."}],
@@ -349,6 +351,26 @@ Build the course ONLY from the source material below. Do not add facts, numbers 
 <source_material>
 ${b.source}
 </source_material>` : ''}`;
+}
+
+// Chat apps often turn " into curly quotes when text is copied. Try the text as it is, then repair the
+// quotes that act as JSON delimiters (curly quotes inside sentences are valid and are kept), then all of them.
+function parseLooseJson(text) {
+  // Line breaks typed inside a text value are not allowed in JSON: turn them into \n.
+  const fixBreaks = x => { let out = '', inStr = false, esc = false;
+    for (const ch of x) {
+      if (inStr && !esc && (ch === '\n' || ch === '\r' || ch === '\t')) { out += ch === '\t' ? '\\t' : ch === '\n' ? '\\n' : ''; continue; }
+      if (ch === '"' && !esc) inStr = !inStr;
+      esc = ch === '\\' && !esc; out += ch;
+    }
+    return out; };
+  const t = text.replace(/\u00a0/g, ' ');
+  const tries = [t,
+    t.replace(/([{\[,:]\s*)[\u201c\u201d]/g, '$1"').replace(/[\u201c\u201d](\s*[:,}\]])/g, '"$1'),
+    t.replace(/[\u201c\u201d]/g, '"')];
+  let firstError;
+  for (const x of tries) for (const y of [x, fixBreaks(x)]) { try { return JSON.parse(y); } catch (e) { firstError ??= e; } }
+  throw firstError;
 }
 
 // Same checks the server function applies, so bad data never reaches the database.
@@ -371,7 +393,7 @@ function renderChatFlow(ctx, body) {
     <textarea id="cfPrompt" rows="6" readonly>${esc(prompt)}</textarea>
     <div class="row" style="margin-top:8px"><button type="button" class="sec" id="cfCopy">Copy prompt</button></div>
     <h3 style="margin-top:18px">Step 2 · Copy the AI's reply and paste it here</h3>
-    <p class="muted small">Not the prompt: the AI's reply. It contains your course title and lesson text, and starts with <code>{</code>. In claude.ai you can use the copy button under the reply.</p>
+    <p class="muted small">Not the prompt: the AI's reply. It contains your course title and lesson text. Best: use the <b>copy button on the code block</b> in the AI's reply.</p>
     <textarea id="cfAnswer" rows="6" placeholder="Paste the AI's reply here"></textarea>
     <div class="row" style="margin-top:8px"><button type="button" id="cfPreview">Preview course</button></div></div>`;
   box.scrollIntoView({ behavior: 'smooth' });
@@ -385,8 +407,8 @@ function renderChatFlow(ctx, body) {
       return toast('That is the prompt, not the answer. Paste the prompt into the AI chat, send it, then copy the AI\'s reply and paste it here.', 9000);
     if (a < 0 || z <= a) return toast('Paste the whole answer, from the first { to the last }.', 5000);
     let course;
-    try { course = cleanCourse(JSON.parse(raw.slice(a, z + 1))); }
-    catch (e) { return toast(`Could not read the answer: ${e.message} Ask the AI to "reply with only the JSON" and paste again.`, 7000); }
+    try { course = cleanCourse(parseLooseJson(raw.slice(a, z + 1))); }
+    catch (e) { return toast(`Could not read the answer: ${e.message} Ask the AI to "put the JSON in a code block" and copy it with the code block's copy button.`, 8000); }
     if (course.questions.length < body.questions) toast(`Note: ${course.questions.length} usable quiz questions were found.`, 5000);
     renderAiPreview(ctx, course);
   };

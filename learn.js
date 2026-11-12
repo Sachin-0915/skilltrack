@@ -155,7 +155,7 @@ function openCertificate(a) {
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Certificate - ${esc(a.courses.title)}</title>
   <style>@page{size:A4 landscape;margin:0}body{margin:0;font-family:Georgia,'Times New Roman',serif;color:#1d2433;background:#fff}
   .c{box-sizing:border-box;width:297mm;height:210mm;padding:22mm;border:10px solid ${col};outline:2px solid ${col};outline-offset:-22px;text-align:center;display:flex;flex-direction:column;justify-content:center}
-  .co{font:600 16px system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:${col}}.lg{max-height:70px;max-width:260px;margin:0 auto 10px;display:block}h1{font-size:46px;margin:18px 0 8px}
+  .co{font:600 16px system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:${col}}.lg{max-height:110px;max-width:340px;object-fit:contain;margin:0 auto 10px;display:block}h1{font-size:46px;margin:18px 0 8px}
   .n{font-size:38px;margin:14px 0;border-bottom:1px solid #ccd;display:inline-block;padding:0 40px 6px}.t{font-size:24px;font-style:italic}
   .meta{margin-top:30px;font:14px system-ui,sans-serif;color:#5d6678;display:flex;justify-content:space-around}
   .p{font:14px system-ui,sans-serif;margin:20px}@media print{.p{display:none}}</style></head><body>

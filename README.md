@@ -44,7 +44,14 @@ Simple training and compliance tracking for growing companies: assign mandatory 
 - HR reviews a preview, then saves it as a **draft** course to edit and publish (nothing is published automatically)
 - Runs in a Supabase Edge Function (`supabase/functions/ai-course`), so the AI key never reaches the browser, and only HR admins can use it
 
-Coming next: automatic email reminders.
+## Week 6 features (live)
+- **Admin-created logins**: when HR adds an employee (one by one, CSV, or a new company's HR admin), SkillTrack can create the login straight away
+- A **temporary password** is generated, shown to the admin **once** with a Copy button (and Copy all / Download CSV for bulk), and emailed in a **welcome email** with the login page, email and password
+- **Reset password** for any employee: a new temporary password, shown once and emailed
+- Employees must **choose their own password at first login**
+- Passwords are never stored in a readable form; logins are managed by a Supabase Edge Function (`supabase/functions/manage-users`) that checks the caller is HR admin of that company
+
+Coming next: automatic training reminder emails.
 
 ## One-time setup
 
@@ -52,7 +59,7 @@ Coming next: automatic email reminders.
 1. Open your Supabase project → **SQL Editor** → **New query**.
 2. Open `setup.sql`, find `YOUR_EMAIL_HERE` at the bottom and replace it with **your** email (this becomes the Super Admin).
 3. Paste the whole file into the editor and click **Run**. You should see "Success. No rows returned".
-4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`.
+4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`, then `week6.sql`.
 
 ### 2. Login settings (Supabase)
 1. **Authentication → URL Configuration**
@@ -64,6 +71,11 @@ Coming next: automatic email reminders.
 1. Create an API key at console.anthropic.com (add a little credit first).
 2. Supabase → **Edge Functions → Secrets** → add `ANTHROPIC_API_KEY` with that key.
 3. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `ai-course`, paste `supabase/functions/ai-course/index.ts`, Deploy.
+
+### 3b. Logins and welcome emails
+1. Run `week6.sql` in the SQL Editor.
+2. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `manage-users`, paste `supabase/functions/manage-users/index.ts`, Deploy.
+3. Optional, for emails: create a free Brevo account, verify your sender email, create an API key, and add the secrets `BREVO_API_KEY`, `SENDER_EMAIL` (and optionally `SENDER_NAME`).
 
 ### 4. Connect the app
 Open `config.js` and paste your **Project URL** and **anon public** key from Supabase → Project Settings → API.

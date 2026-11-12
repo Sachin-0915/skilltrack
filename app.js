@@ -86,15 +86,19 @@ function renderAuth(tab) {
   };
 }
 
-function renderNewPassword() {
-  app.innerHTML = `<div class="card narrow"><h2>Set a new password</h2>
-    <form id="npForm"><label for="np">New password</label><input id="np" type="password" minlength="8" required>
+function renderNewPassword(forced) {
+  app.innerHTML = `<div class="card narrow"><h2>${forced ? 'Welcome! Choose your own password' : 'Set a new password'}</h2>
+    ${forced ? '<p class="muted small">You logged in with a temporary password. Please choose a new one to continue (at least 8 characters).</p>' : ''}
+    <form id="npForm"><label for="np">New password</label><input id="np" type="password" minlength="8" required autocomplete="new-password">
+    <label for="np2">Confirm new password</label><input id="np2" type="password" minlength="8" required autocomplete="new-password">
     <div class="row" style="margin-top:16px"><button>Save password</button></div><div id="npMsg"></div></form></div>`;
   $('#npForm').onsubmit = async e => {
     e.preventDefault();
+    if ($('#np').value !== $('#np2').value) return $('#npMsg').innerHTML = `<div class="msg err">The two passwords do not match.</div>`;
     const { data, error } = await sb.auth.updateUser({ password: $('#np').value });
     if (error) return $('#npMsg').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
-    toast('Password updated.'); await loadMe(data.user);
+    await sb.rpc('password_changed');
+    toast('Password saved.'); await loadMe(data.user);
   };
 }
 
@@ -114,6 +118,7 @@ async function loadMe(user) {
     app.innerHTML = `<div class="card narrow"><h2>No access</h2><p class="muted">Your account is not active in any company. Please contact your HR admin.</p></div>`;
     return;
   }
+  if (member.must_change_password) return renderNewPassword(true);
   const ctx = { companyId: member.company_id, companyName: me.company?.name, fromSuper: false };
   if (member.role === 'org_admin') return renderEmployees(ctx.companyId, ctx.companyName);
   if (member.role === 'manager') return renderTeam(ctx);
@@ -145,17 +150,19 @@ async function renderCompanies() {
       <div><label>Max users</label><input id="coMax" type="number" min="1" value="100" required></div>
       <div><label>HR admin name</label><input id="adName" required></div>
       <div><label>HR admin email</label><input id="adEmail" type="email" required></div>
-    </div><div class="row" style="margin-top:16px"><button id="coGo">Create company</button></div><div id="coMsg"></div></form></div>`;
+    </div>${loginCheckbox('coLogin')}<div class="row" style="margin-top:16px"><button id="coGo">Create company</button></div><div id="coMsg"></div></form></div>`;
   $('#coForm').onsubmit = async e => {
     e.preventDefault(); const btn = $('#coGo'); btn.disabled = true; $('#coMsg').innerHTML = '';
     try {
       const { data: co, error } = await sb.from('companies')
         .insert({ name: $('#coName').value.trim(), plan: $('#coPlan').value, max_users: +$('#coMax').value }).select().single();
       if (error) throw error;
-      const { error: e2 } = await sb.from('members').insert({ company_id: co.id, full_name: $('#adName').value.trim(), email: $('#adEmail').value.trim().toLowerCase(), role: 'org_admin' });
+      const { data: hr, error: e2 } = await sb.from('members').insert({ company_id: co.id, full_name: $('#adName').value.trim(), email: $('#adEmail').value.trim().toLowerCase(), role: 'org_admin' }).select('id').single();
       if (e2) { await sb.from('companies').delete().eq('id', co.id); throw e2; }
-      $('#coMsg').innerHTML = `<div class="msg ok">${esc(co.name)} created. Ask the HR admin to open <b>${esc(SITE)}</b> and choose "Create account".</div>`;
+      const withLogin = $('#coLogin').checked;
+      $('#coMsg').innerHTML = `<div class="msg ok">${esc(co.name)} created.${withLogin ? '' : ` Ask the HR admin to open <b>${esc(SITE)}</b> and choose "Create account".`}</div>`;
       e.target.reset(); loadCompanies();
+      if (withLogin) manageLogins('create_login', [hr.id]);
     } catch (err) { $('#coMsg').innerHTML = `<div class="msg err">${esc(friendly(err))}</div>`; }
     btn.disabled = false;
   };
@@ -212,6 +219,7 @@ function renderEmployees(companyId, companyName, fromSuper = false) {
           <label>Department</label><input id="aDept" placeholder="e.g. Sales">
           <label>Role</label><select id="aRole"><option value="learner">Learner</option><option value="manager">Manager</option><option value="org_admin">Org Admin</option></select>
           <label>Manager's email (optional)</label><input id="aMgr" type="email">
+          ${loginCheckbox('aLogin')}
           <div class="row" style="margin-top:16px"><button id="aGo">Add employee</button></div><div id="aMsg"></div>
         </form></div>
       <div class="card"><h2>Upload many (CSV)</h2>
@@ -234,10 +242,14 @@ function renderEmployees(companyId, companyName, fromSuper = false) {
   $('#addForm').onsubmit = async e => {
     e.preventDefault(); const btn = $('#aGo'); btn.disabled = true; $('#aMsg').innerHTML = '';
     const row = cleanRow({ full_name: $('#aName').value, email: $('#aEmail').value, department: $('#aDept').value, role: $('#aRole').value, manager_email: $('#aMgr').value });
-    const { error } = await sb.from('members').insert({ ...row, company_id: emp.companyId });
-    if (error) $('#aMsg').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
-    else { $('#aMsg').innerHTML = `<div class="msg ok">${esc(row.full_name)} added. Share the sign-up link with them.</div>`; e.target.reset(); loadEmployees(); }
+    if (!EMAIL_RE.test(row.email) || /^www\./.test(row.email)) { btn.disabled = false; return $('#aMsg').innerHTML = `<div class="msg err">Please check the email address.</div>`; }
+    const withLogin = $('#aLogin').checked;
+    const { data: added, error } = await sb.from('members').insert({ ...row, company_id: emp.companyId }).select('id').single();
     btn.disabled = false;
+    if (error) return $('#aMsg').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+    $('#aMsg').innerHTML = `<div class="msg ok">${esc(row.full_name)} added.${withLogin ? '' : ' Share the sign-up link with them, or click Create login in the list.'}</div>`;
+    e.target.reset(); $('#aLogin').checked = true; loadEmployees();
+    if (withLogin) manageLogins('create_login', [added.id]);
   };
   $('#tpl').onclick = () => download('skilltrack-employees-template.csv',
     'full_name,email,department,role,manager_email\nPriya Nair,priya@yourcompany.com,Sales,manager,\nRahul Verma,rahul@yourcompany.com,Sales,learner,priya@yourcompany.com\n');
@@ -274,12 +286,17 @@ function drawEmployees() {
       return `<tr><td><b>${esc(r.full_name)}</b></td><td>${esc(r.email)}</td><td>${esc(r.department || '–')}</td>
         <td>${self ? esc(ROLES[r.role]) : `<select data-role="${r.id}">${Object.entries(ROLES).map(([k, v]) => `<option value="${k}" ${k === r.role ? 'selected' : ''}>${v}</option>`).join('')}</select>`}</td>
         <td>${esc(r.manager_email || '–')}</td><td><span class="tag ${cls}">${st}</span></td>
-        <td>${self ? '<span class="muted small">You</span>' : `<button class="link" data-act="${r.id}" data-on="${r.active}">${r.active ? 'Deactivate' : 'Reactivate'}</button>`}</td></tr>`;
+        <td>${self ? '<span class="muted small">You</span>' : `${r.active ? (r.user_id ? `<button class="link" data-reset="${r.id}">Reset password</button>` : `<button class="link" data-login="${r.id}">Create login</button>`) : ''}<button class="link" data-act="${r.id}" data-on="${r.active}">${r.active ? 'Deactivate' : 'Reactivate'}</button>`}</td></tr>`;
     }).join('') || `<tr><td colspan="7" class="muted">No employees match these filters.</td></tr>`}
     </tbody></table>`;
   $('#empList').querySelectorAll('[data-role]').forEach(s => s.onchange = async () => {
     const { error } = await sb.from('members').update({ role: s.value }).eq('id', s.dataset.role);
     toast(error ? friendly(error) : 'Role updated.'); loadEmployees();
+  });
+  $('#empList').querySelectorAll('[data-login]').forEach(b => b.onclick = () => manageLogins('create_login', [b.dataset.login]));
+  $('#empList').querySelectorAll('[data-reset]').forEach(b => b.onclick = () => {
+    const m = emp.rows.find(r => r.id === b.dataset.reset);
+    if (confirm(`Reset the password for ${m.full_name}? Their current password will stop working and they will get a new temporary one.`)) manageLogins('reset_password', [m.id]);
   });
   $('#empList').querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     const on = b.dataset.on === 'true';
@@ -332,17 +349,19 @@ function previewCsv(text) {
   });
   out.innerHTML = `<div class="msg info"><b>${pending.length}</b> employees ready to import${problems.length ? `, <b>${problems.length}</b> rows skipped` : ''}.</div>
     ${problems.length ? `<details style="margin-top:8px"><summary class="small">See skipped rows</summary><ul class="small">${problems.slice(0, 50).map(p => `<li>${esc(p)}</li>`).join('')}</ul></details>` : ''}
-    ${pending.length ? `<div class="row" style="margin-top:12px"><button id="doImport">Import ${pending.length} employees</button></div>` : ''}`;
+    ${pending.length ? `${loginCheckbox('csvLogin', 'Create logins and send welcome emails')}<div class="row" style="margin-top:12px"><button id="doImport">Import ${pending.length} employees</button></div>` : ''}`;
   if (pending.length) $('#doImport').onclick = runImport;
 }
 async function runImport() {
-  const btn = $('#doImport'); btn.disabled = true; let ok = 0; const fails = [];
+  const btn = $('#doImport'); btn.disabled = true; let ok = 0; const fails = [], newIds = [];
+  const withLogin = $('#csvLogin').checked;
   for (let i = 0; i < pending.length; i++) {
     btn.textContent = `Importing ${i + 1} of ${pending.length}…`;
     const r = pending[i];
-    const { error } = await sb.from('members').insert({ ...r, company_id: emp.companyId });
-    if (error) { fails.push(`${r.email}: ${friendly(error)}`); if (/limit reached/i.test(error.message)) break; } else ok++;
+    const { data, error } = await sb.from('members').insert({ ...r, company_id: emp.companyId }).select('id').single();
+    if (error) { fails.push(`${r.email}: ${friendly(error)}`); if (/limit reached/i.test(error.message)) break; } else { ok++; newIds.push(data.id); }
   }
+  if (withLogin && newIds.length) manageLogins('create_login', newIds);
   $('#csvOut').innerHTML = `<div class="msg ${fails.length ? 'err' : 'ok'}">${ok} employees imported.${fails.length ? ` ${fails.length} failed.` : ''}</div>
     ${fails.length ? `<ul class="small">${fails.slice(0, 50).map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}`;
   $('#csv').value = ''; pending = []; loadEmployees();
@@ -370,4 +389,59 @@ async function renderTeam(ctx) {
     ${work.sort((a, b) => assignmentStatus(a).text === 'Overdue' ? -1 : 1).map(a => { const s = assignmentStatus(a);
       return `<tr><td>${esc(who(a.member_id))}</td><td>${esc(a.courses.title)}</td><td><span class="tag ${s.cls}">${s.text}</span></td><td>${a.best_score ?? '–'}${a.best_score != null ? '%' : ''}</td><td>${fmtDate(a.due_date)}</td></tr>`; }).join('')}</tbody></table>`}</div>`;
   wireNav(ctx);
+}
+
+/* ---------------- Logins created by admins (Week 6) ---------------- */
+function loginCheckbox(id, label = 'Create login and send welcome email') {
+  return `<label class="pickrow" style="margin-top:14px"><input type="checkbox" id="${id}" checked style="width:auto"> ${label}</label>
+    <p class="muted small" style="margin:2px 0 0 26px">A temporary password is created, shown to you once and emailed (if email is set up). They choose their own password at first login.</p>`;
+}
+
+async function manageLogins(action, ids) {
+  const busy = showModal(`<h2>${action === 'reset_password' ? 'Resetting password…' : `Creating ${ids.length === 1 ? 'login' : ids.length + ' logins'}…`}</h2><p class="muted">Please wait.</p>`);
+  const { data, error } = await sb.functions.invoke('manage-users', { body: { action, member_ids: ids, app_url: SITE } });
+  busy.close();
+  if (error) {
+    let msg = 'Login management is not set up yet: deploy the "manage-users" function in Supabase (see README).';
+    if (error.context?.status && error.context.status !== 404) try { const j = await error.context.json(); if (j.error) msg = j.error; } catch { /* keep message */ }
+    return toast(msg, 8000);
+  }
+  if (typeof loadEmployees === 'function' && view === 'employees') loadEmployees();
+  if (view === 'companies') loadCompanies();
+  showLogins(action, data.results || [], data.email_configured);
+}
+
+function showLogins(action, results, emailConfigured) {
+  const good = results.filter(r => r.password), bad = results.filter(r => !r.password);
+  const lines = good.map(r => `${r.full_name} | ${r.email} | ${r.password}`).join('\n');
+  const m = showModal(`<h2>${action === 'reset_password' ? 'New temporary password' : good.length === 1 ? 'Login created' : `${good.length} logins created`}</h2>
+    <p class="msg info small">Copy these now: for security, SkillTrack does not store passwords and cannot show them again. ${action === 'reset_password' ? 'The old password no longer works.' : ''} Each person must choose their own password at first login.</p>
+    ${!emailConfigured && good.length ? '<p class="msg err small">Welcome emails are not set up yet, so nothing was emailed. Share the login page, email and password with each person yourself.</p>' : ''}
+    ${good.length ? `<div class="tbl"><table><thead><tr><th>Name</th><th>Email (login ID)</th><th>Temporary password</th><th></th><th>Email sent</th></tr></thead><tbody>
+      ${good.map((r, i) => `<tr><td>${esc(r.full_name)}</td><td>${esc(r.email)}</td><td><code class="pw">${esc(r.password)}</code></td>
+        <td><button class="link" data-copy="${i}">Copy</button></td><td>${r.emailed ? '<span class="tag ok">Sent</span>' : '<span class="tag warn">Not sent</span>'}</td></tr>`).join('')}
+    </tbody></table></div>
+    <p class="small muted">Login page: <b>${esc(SITE)}</b></p>` : ''}
+    ${bad.length ? `<p class="small"><b>Not done:</b></p><ul class="small">${bad.map(r => `<li>${esc(r.full_name)} (${esc(r.email)}): ${esc(r.error || 'failed')}</li>`).join('')}</ul>` : ''}
+    <div class="row" style="margin-top:14px">${good.length > 1 ? '<button class="sec" id="copyAll">Copy all</button><button class="sec" id="dlLogins">Download CSV</button>' : ''}<button id="doneLogins">Done</button></div>`);
+  const copy = async text => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { prompt('Copy this:', text); } };
+  m.el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
+    const r = good[+b.dataset.copy];
+    copy(`Login page: ${SITE}\nEmail: ${r.email}\nTemporary password: ${r.password}\nYou will be asked to choose your own password when you log in.`);
+  });
+  if (m.el.querySelector('#copyAll')) m.el.querySelector('#copyAll').onclick = () => copy(`Login page: ${SITE}\n${lines}`);
+  if (m.el.querySelector('#dlLogins')) m.el.querySelector('#dlLogins').onclick = () =>
+    download('skilltrack-logins.csv', ['full_name,email,temporary_password', ...good.map(r => [r.full_name, r.email, r.password].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n'));
+  m.el.querySelector('#doneLogins').onclick = () => {
+    if (good.length && !confirm('Have you copied the passwords? They cannot be shown again.')) return;
+    m.close();
+  };
+}
+
+function showModal(html) {
+  const el = document.createElement('div');
+  el.className = 'modal-bg';
+  el.innerHTML = `<div class="modal card" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(el);
+  return { el, close: () => el.remove() };
 }

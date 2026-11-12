@@ -12,6 +12,7 @@ function assignmentStatus(a) {
   return { text: 'Not started', cls: '' };
 }
 const fmtDate = d => d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '–';
+const fileLabel = c => decodeURIComponent(String(c).split('/').pop().replace(/^\d+-/, ''));
 const safeUrl = u => /^https?:\/\//i.test((u || '').trim()) ? u.trim() : '';
 
 /* ---------------- course list ---------------- */
@@ -87,13 +88,16 @@ function drawEditor() {
       <div class="row" style="margin-top:14px"><button>Save details</button></div></form></div>
 
     <div class="card"><h2>2. Lessons</h2>
-      ${lessons.length ? `<div class="tbl"><table><tbody>${lessons.map((l, i) => `<tr><td class="muted">${i + 1}</td><td><b>${esc(l.title)}</b></td><td>${{ text: 'Text', video: 'Video', pdf: 'PDF' }[l.type]}</td>
+      ${lessons.length ? `<div class="tbl"><table><tbody>${lessons.map((l, i) => `<tr><td class="muted">${i + 1}</td><td><b>${esc(l.title)}</b></td><td>${{ text: 'Text', video: 'Video', pdf: 'PDF' }[l.type]}${l.content.startsWith('file:') ? ' <span class="tag">file</span>' : ''}</td>
         <td style="text-align:right"><button class="link" data-up="${i}" ${i === 0 ? 'disabled' : ''}>↑</button><button class="link" data-down="${i}" ${i === lessons.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="link" data-le="${l.id}">Edit</button><button class="link" data-ld="${l.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>`
         : `<p class="muted">No lessons yet. Add the first one below.</p>`}
       <form id="lesForm" style="margin-top:12px"><h3 class="small muted" style="margin:0">${ed.editLesson ? 'Edit lesson' : 'Add a lesson'}</h3>
         <div class="grid3"><div style="grid-column:span 2"><label>Lesson title</label><input id="lTitle" required></div>
-          <div><label>Type</label><select id="lType"><option value="text">Text</option><option value="video">Video link (YouTube / Vimeo)</option><option value="pdf">PDF link</option></select></div></div>
+          <div><label>Type</label><select id="lType"><option value="text">Text</option><option value="video">Video (upload or YouTube / Vimeo link)</option><option value="pdf">PDF (upload or link)</option></select></div></div>
+        <div id="lUpload" hidden><label>Upload a file</label><input type="file" id="lFile">
+          <p class="muted small" id="lFileMsg">Up to 50 MB. Only people in your company can open it.</p>
+          <p class="small muted" style="margin:10px 0 0">…or paste a link instead:</p></div>
         <label id="lContentLabel">Content</label><textarea id="lContent" rows="6" required></textarea>
         <p class="muted small" id="lHint"></p>
         <div class="row"><button>${ed.editLesson ? 'Save lesson' : 'Add lesson'}</button>${ed.editLesson ? '<button type="button" class="sec" id="lCancel">Cancel</button>' : ''}</div></form></div>
@@ -140,16 +144,34 @@ function wireEditor() {
 
   // lessons
   const hints = { text: ['Content', 'Write or paste the lesson text. Leave a blank line between paragraphs.'],
-    video: ['Video link', 'Paste a YouTube or Vimeo link, e.g. https://www.youtube.com/watch?v=…'],
-    pdf: ['PDF link', 'Paste a public link to a PDF (e.g. a Google Drive file shared as "Anyone with the link").'] };
-  const setHint = () => { const [l, h] = hints[$('#lType').value]; $('#lContentLabel').textContent = l; $('#lHint').textContent = h; $('#lContent').rows = $('#lType').value === 'text' ? 6 : 1; };
+    video: ['Video link', 'Upload an MP4 file above, or paste a YouTube or Vimeo link, e.g. https://www.youtube.com/watch?v=…'],
+    pdf: ['PDF link', 'Upload a PDF above, or paste a public link to a PDF (e.g. a Google Drive file shared as "Anyone with the link").'] };
+  const accept = { video: 'video/mp4,video/webm', pdf: 'application/pdf' };
+  const setHint = () => { const t = $('#lType').value, [l, h] = hints[t]; $('#lContentLabel').textContent = l; $('#lHint').textContent = h;
+    $('#lContent').rows = t === 'text' ? 6 : 1; $('#lUpload').hidden = t === 'text'; $('#lFile').accept = accept[t] || ''; };
   $('#lType').onchange = setHint;
   if (ed.editLesson) { const l = ed.lessons.find(x => x.id === ed.editLesson); $('#lTitle').value = l.title; $('#lType').value = l.type; $('#lContent').value = l.content; }
   setHint();
+  if (ed.editLesson && $('#lContent').value.startsWith('file:')) $('#lFileMsg').textContent = `Current file: ${fileLabel($('#lContent').value)}. Choose a new file to replace it.`;
+  $('#lFile').onchange = async e => {
+    const f = e.target.files[0], type = $('#lType').value; if (!f) return;
+    const okType = type === 'pdf' ? f.type === 'application/pdf' : /^video\/(mp4|webm)$/.test(f.type);
+    if (!okType) { e.target.value = ''; return toast(type === 'pdf' ? 'Please choose a PDF file.' : 'Please choose an MP4 or WebM video.'); }
+    if (f.size > 52428800) { e.target.value = ''; return toast('The file is larger than 50 MB. Please compress it, or upload it to YouTube and paste the link.', 7000); }
+    const btn = $('#lesForm button'); btn.disabled = true; $('#lFileMsg').textContent = `Uploading ${f.name}… please wait.`;
+    const safe = f.name.toLowerCase().replace(/[^a-z0-9.]+/g, '-').slice(-60);
+    const path = `${c.company_id}/${c.id}/${Date.now()}-${safe}`;
+    const { error } = await sb.storage.from('course-files').upload(path, f, { contentType: f.type });
+    btn.disabled = false;
+    if (error) { e.target.value = ''; $('#lFileMsg').textContent = 'Upload failed.'; return toast(friendly(error)); }
+    $('#lContent').value = 'file:' + path;
+    if (!$('#lTitle').value.trim()) $('#lTitle').value = f.name.replace(/\.[^.]+$/, '');
+    $('#lFileMsg').textContent = `Uploaded: ${f.name} ✓ Now click "${ed.editLesson ? 'Save lesson' : 'Add lesson'}".`;
+  };
   $('#lesForm').onsubmit = async e => {
     e.preventDefault();
     const type = $('#lType').value, content = $('#lContent').value.trim();
-    if (type !== 'text' && !safeUrl(content)) return toast('Please paste a full link starting with https://');
+    if (type !== 'text' && !content.startsWith('file:') && !safeUrl(content)) return toast('Upload a file, or paste a full link starting with https://');
     const row = { title: $('#lTitle').value.trim(), type, content };
     const { error } = ed.editLesson
       ? await sb.from('lessons').update(row).eq('id', ed.editLesson)
@@ -161,7 +183,10 @@ function wireEditor() {
   app.querySelectorAll('[data-le]').forEach(b => b.onclick = () => { ed.editLesson = b.dataset.le; drawEditor(); $('#lesForm').scrollIntoView({ behavior: 'smooth' }); });
   app.querySelectorAll('[data-ld]').forEach(b => b.onclick = async () => {
     if (!confirm('Delete this lesson?')) return;
-    const { error } = await sb.from('lessons').delete().eq('id', b.dataset.ld); toast(error ? friendly(error) : 'Lesson deleted.'); reload();
+    const l = ed.lessons.find(x => x.id === b.dataset.ld);
+    const { error } = await sb.from('lessons').delete().eq('id', b.dataset.ld);
+    if (!error && l?.content.startsWith('file:')) await sb.storage.from('course-files').remove([l.content.slice(5)]);
+    toast(error ? friendly(error) : 'Lesson deleted.'); reload();
   });
   const move = async (i, j) => {
     const a = ed.lessons[i], b = ed.lessons[j];

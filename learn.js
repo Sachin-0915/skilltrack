@@ -57,7 +57,13 @@ async function renderPlayer(assignmentId, ctx, lessonId) {
 
   const stage = $('#stage');
   if (current) {
-    stage.innerHTML = `<h2>${esc(current.title)}</h2><div class="lesson-body">${lessonBody(current)}</div>
+    // Uploaded files are private: get a link that works for one hour, for this learner only.
+    let fileUrl = null;
+    if (current.content.startsWith('file:')) {
+      const { data: signed } = await sb.storage.from('course-files').createSignedUrl(current.content.slice(5), 3600);
+      fileUrl = signed?.signedUrl || null;
+    }
+    stage.innerHTML = `<h2>${esc(current.title)}</h2><div class="lesson-body">${lessonBody(current, fileUrl)}</div>
       <div class="row" style="justify-content:flex-end;margin-top:20px">${doneSet.has(current.id) ? '<span class="muted small">Completed ✓</span>' : ''}
       <button id="doneBtn">${doneSet.has(current.id) ? 'Next' : 'Mark complete and continue'}</button></div>`;
     $('#doneBtn').onclick = async () => {
@@ -76,8 +82,15 @@ async function renderPlayer(assignmentId, ctx, lessonId) {
   } else renderQuiz(a, ctx, stage);
 }
 
-function lessonBody(l) {
+function lessonBody(l, fileUrl) {
   if (l.type === 'text') return l.content.split(/\n\s*\n/).map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+  if (l.content.startsWith('file:')) {
+    if (!fileUrl) return `<p class="muted">This file could not be opened. Please refresh the page, or tell your HR admin.</p>`;
+    return l.type === 'video'
+      ? `<div class="video"><video src="${esc(fileUrl)}" controls preload="metadata" controlsList="nodownload"></video></div>`
+      : `<div class="pdf"><iframe src="${esc(fileUrl)}" title="${esc(l.title)}"></iframe></div>
+         <p class="small"><a href="${esc(fileUrl)}" target="_blank" rel="noopener">Open the PDF in a new tab</a> if it does not show above.</p>`;
+  }
   const url = safeUrl(l.content);
   if (!url) return `<p class="muted">This lesson's link is missing. Please tell your HR admin.</p>`;
   if (l.type === 'video') {
@@ -136,17 +149,18 @@ async function submitQuiz(a, ctx, stage, answers, qs) {
 
 /* ---------------- certificate ---------------- */
 function openCertificate(a) {
+  const col = /^#[0-9a-f]{6}$/i.test(me.company?.brand_color || '') ? me.company.brand_color : '#2f5bea';
   const w = window.open('', '_blank');
   if (!w) return toast('Please allow pop-ups to download your certificate.');
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Certificate - ${esc(a.courses.title)}</title>
   <style>@page{size:A4 landscape;margin:0}body{margin:0;font-family:Georgia,'Times New Roman',serif;color:#1d2433;background:#fff}
-  .c{box-sizing:border-box;width:297mm;height:210mm;padding:22mm;border:10px solid #2f5bea;outline:2px solid #2f5bea;outline-offset:-22px;text-align:center;display:flex;flex-direction:column;justify-content:center}
-  .co{font:600 16px system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#2f5bea}h1{font-size:46px;margin:18px 0 8px}
+  .c{box-sizing:border-box;width:297mm;height:210mm;padding:22mm;border:10px solid ${col};outline:2px solid ${col};outline-offset:-22px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+  .co{font:600 16px system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:${col}}.lg{max-height:70px;max-width:260px;margin:0 auto 10px;display:block}h1{font-size:46px;margin:18px 0 8px}
   .n{font-size:38px;margin:14px 0;border-bottom:1px solid #ccd;display:inline-block;padding:0 40px 6px}.t{font-size:24px;font-style:italic}
   .meta{margin-top:30px;font:14px system-ui,sans-serif;color:#5d6678;display:flex;justify-content:space-around}
   .p{font:14px system-ui,sans-serif;margin:20px}@media print{.p{display:none}}</style></head><body>
   <p class="p">Use your browser's print window and choose <b>Save as PDF</b>.</p>
-  <div class="c"><div class="co">${esc(me.company?.name || '')}</div><h1>Certificate of Completion</h1>
+  <div class="c">${me.company?.logo_url ? `<img class="lg" src="${esc(me.company.logo_url)}" alt="">` : ''}<div class="co">${esc(me.company?.name || '')}</div><h1>Certificate of Completion</h1>
   <div>This certifies that</div><div class="n">${esc(me.member.full_name)}</div>
   <div>has successfully completed</div><div class="t">${esc(a.courses.title)}</div>
   <div class="meta"><span>Date: <b>${fmtDate(a.completed_at)}</b></span><span>Score: <b>${a.best_score ?? 100}%</b></span><span>Certificate no: <b>${esc(a.certificate_no || '')}</b></span></div>

@@ -10,6 +10,7 @@ const SITE = location.origin + location.pathname;
 let sb = null;
 let me = null;            // { user, member, isSuper, company }
 let view = null;          // current screen name
+let tenant = null;        // company shown on the login page (from ?company=)
 
 function toast(text, ms = 3500) {
   const t = $('#toast'); t.textContent = text; t.hidden = false;
@@ -31,8 +32,11 @@ async function start() {
   sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
   sb.auth.onAuthStateChange((event, session) => {
     if (event === 'PASSWORD_RECOVERY') return renderNewPassword();
-    if (event === 'SIGNED_OUT') { me = null; $('#toast').hidden = true; renderAuth('login'); }
+    if (event === 'SIGNED_OUT') { me = null; $('#toast').hidden = true; applyBrand(tenant); renderAuth('login'); }
   });
+  // Tenant login link: ?company=<slug> shows that company's logo, name and colour on the login page.
+  const slug = new URLSearchParams(location.search).get('company');
+  if (slug) { const { data: b } = await sb.rpc('company_brand', { p_slug: slug }); if (b) { tenant = b; applyBrand(b); } }
   const { data } = await sb.auth.getSession();
   if (data.session) await loadMe(data.session.user); else renderAuth(location.hash === '#signup' ? 'signup' : 'login');
 }
@@ -48,8 +52,9 @@ function renderAuth(tab) {
   $('#who').innerHTML = '';
   const t = (id, label) => `<button data-tab="${id}" class="${tab === id ? 'on' : ''}">${label}</button>`;
   app.innerHTML = `<div class="card narrow">
-    <h1>Welcome to SkillTrack</h1>
-    <p class="muted small">Training and compliance tracking for your company.</p>
+    ${tenant?.logo_url ? `<img class="tenant-logo" src="${esc(tenant.logo_url)}" alt="${esc(tenant.name)} logo">` : ''}
+    <h1>${tenant ? `Sign in to ${esc(tenant.name)}` : 'Welcome to SkillTrack'}</h1>
+    <p class="muted small">${tenant ? 'Your company training portal, powered by SkillTrack.' : 'Training and compliance tracking for your company.'}</p>
     <div class="tabs">${t('login', 'Log in')}${t('signup', 'Create account')}${t('forgot', 'Forgot password')}</div>
     <form id="authForm">
       <label for="email">Work email</label><input id="email" type="email" required autocomplete="email">
@@ -106,13 +111,14 @@ function renderNewPassword(forced) {
 async function loadMe(user) {
   const [{ data: isSuper }, { data: member }] = await Promise.all([
     sb.rpc('is_super_admin'),
-    sb.from('members').select('*, companies(name, status)').eq('user_id', user.id).maybeSingle()
+    sb.from('members').select('*, companies(name, status, slug, logo_url, brand_color)').eq('user_id', user.id).maybeSingle()
   ]);
   me = { user, isSuper: !!isSuper, member, company: member?.companies || null };
   const roleLabel = me.isSuper ? 'Super Admin' : ROLES[member?.role] || 'No access';
   $('#who').innerHTML = `<span>${esc(member?.full_name || user.email)} · ${esc(roleLabel)}${me.company ? ' · ' + esc(me.company.name) : ''}</span>
     <button class="sec" id="logout">Log out</button>`;
   $('#logout').onclick = () => sb.auth.signOut();
+  applyBrand(me.isSuper ? null : me.company);
   if (me.isSuper) return renderCompanies();
   if (!member || !member.active) {
     app.innerHTML = `<div class="card narrow"><h2>No access</h2><p class="muted">Your account is not active in any company. Please contact your HR admin.</p></div>`;
@@ -128,13 +134,13 @@ async function loadMe(user) {
 /* ---------------- navigation tabs ---------------- */
 function adminNav(active, ctx) {
   const tabs = [];
-  if (me.isSuper || me.member?.role === 'org_admin') tabs.push(['employees', 'Employees'], ['courses', 'Courses'], ['reports', 'Reports']);
+  if (me.isSuper || me.member?.role === 'org_admin') tabs.push(['employees', 'Employees'], ['courses', 'Courses'], ['reports', 'Reports'], ['settings', 'Company settings']);
   if (me.member?.role === 'manager') tabs.push(['team', 'My team']);
   if (me.member && !ctx.fromSuper) tabs.push(['learning', 'My learning']);
   return `<div class="nav">${tabs.map(([k, v]) => `<button data-nav="${k}" class="${k === active ? 'on' : ''}">${v}</button>`).join('')}</div>`;
 }
 function wireNav(ctx) {
-  const go = { employees: () => renderEmployees(ctx.companyId, ctx.companyName, ctx.fromSuper), courses: () => renderCourses(ctx), reports: () => renderReports(ctx),
+  const go = { employees: () => renderEmployees(ctx.companyId, ctx.companyName, ctx.fromSuper), courses: () => renderCourses(ctx), reports: () => renderReports(ctx), settings: () => renderSettings(ctx),
                team: () => renderTeam(ctx), learning: () => renderMyLearning(ctx) };
   app.querySelectorAll('[data-nav]').forEach(b => b.onclick = () => go[b.dataset.nav]());
 }
@@ -176,13 +182,14 @@ async function loadCompanies() {
   if (error) return $('#coList').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
   if (!cos.length) return $('#coList').innerHTML = `<p class="muted">No companies yet. Add your first one below.</p>`;
   const count = id => (mem || []).filter(m => m.company_id === id && m.active);
-  $('#coList').innerHTML = `<div class="tbl"><table><thead><tr><th>Company</th><th>Plan</th><th>Users</th><th>Joined</th><th>Status</th><th></th></tr></thead><tbody>
-    ${cos.map(c => `<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.plan)}</td><td>${count(c.id).length} / ${c.max_users}</td>
+  $('#coList').innerHTML = `<div class="tbl"><table><thead><tr><th>Company</th><th>Login link</th><th>Plan</th><th>Users</th><th>Joined</th><th>Status</th><th></th></tr></thead><tbody>
+    ${cos.map(c => `<tr><td><b>${esc(c.name)}</b></td><td><button class="link" data-link="${esc(tenantUrl(c.slug))}">Copy</button></td><td>${esc(c.plan)}</td><td>${count(c.id).length} / ${c.max_users}</td>
       <td>${count(c.id).filter(m => m.user_id).length}</td>
       <td><span class="tag ${c.status === 'active' ? 'ok' : 'warn'}">${esc(c.status)}</span></td>
       <td><button class="link" data-open="${c.id}" data-name="${esc(c.name)}">Manage employees</button>
           <button class="link" data-toggle="${c.id}" data-status="${c.status}">${c.status === 'active' ? 'Pause' : 'Activate'}</button></td></tr>`).join('')}
     </tbody></table></div>`;
+  $('#coList').querySelectorAll('[data-link]').forEach(b => b.onclick = () => copyText(b.dataset.link, 'Login link copied.'));
   $('#coList').querySelectorAll('[data-open]').forEach(b => b.onclick = () => renderEmployees(b.dataset.open, b.dataset.name, true));
   $('#coList').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
     const { error } = await sb.from('companies').update({ status: b.dataset.status === 'active' ? 'paused' : 'active' }).eq('id', b.dataset.toggle);
@@ -421,15 +428,15 @@ function showLogins(action, results, emailConfigured) {
       ${good.map((r, i) => `<tr><td>${esc(r.full_name)}</td><td>${esc(r.email)}</td><td><code class="pw">${esc(r.password)}</code></td>
         <td><button class="link" data-copy="${i}">Copy</button></td><td>${r.emailed ? '<span class="tag ok">Sent</span>' : '<span class="tag warn">Not sent</span>'}</td></tr>`).join('')}
     </tbody></table></div>
-    <p class="small muted">Login page: <b>${esc(SITE)}</b></p>` : ''}
+    <p class="small muted">Login page: <b>${esc(good[0].login_url || SITE)}</b></p>` : ''}
     ${bad.length ? `<p class="small"><b>Not done:</b></p><ul class="small">${bad.map(r => `<li>${esc(r.full_name)} (${esc(r.email)}): ${esc(r.error || 'failed')}</li>`).join('')}</ul>` : ''}
     <div class="row" style="margin-top:14px">${good.length > 1 ? '<button class="sec" id="copyAll">Copy all</button><button class="sec" id="dlLogins">Download CSV</button>' : ''}<button id="doneLogins">Done</button></div>`);
   const copy = async text => { try { await navigator.clipboard.writeText(text); toast('Copied.'); } catch { prompt('Copy this:', text); } };
   m.el.querySelectorAll('[data-copy]').forEach(b => b.onclick = () => {
     const r = good[+b.dataset.copy];
-    copy(`Login page: ${SITE}\nEmail: ${r.email}\nTemporary password: ${r.password}\nYou will be asked to choose your own password when you log in.`);
+    copy(`Login page: ${r.login_url || SITE}\nEmail: ${r.email}\nTemporary password: ${r.password}\nYou will be asked to choose your own password when you log in.`);
   });
-  if (m.el.querySelector('#copyAll')) m.el.querySelector('#copyAll').onclick = () => copy(`Login page: ${SITE}\n${lines}`);
+  if (m.el.querySelector('#copyAll')) m.el.querySelector('#copyAll').onclick = () => copy(`Login page: ${good[0].login_url || SITE}\n${lines}`);
   if (m.el.querySelector('#dlLogins')) m.el.querySelector('#dlLogins').onclick = () =>
     download('skilltrack-logins.csv', ['full_name,email,temporary_password', ...good.map(r => [r.full_name, r.email, r.password].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n'));
   m.el.querySelector('#doneLogins').onclick = () => {
@@ -444,4 +451,72 @@ function showModal(html) {
   el.innerHTML = `<div class="modal card" role="dialog" aria-modal="true">${html}</div>`;
   document.body.appendChild(el);
   return { el, close: () => el.remove() };
+}
+
+/* ---------------- Company branding (Week 7) ---------------- */
+const DEFAULT_BRAND = '#2f5bea';
+const tenantUrl = slug => slug ? `${SITE}?company=${encodeURIComponent(slug)}` : SITE;
+async function copyText(text, msg = 'Copied.') {
+  try { await navigator.clipboard.writeText(text); toast(msg); } catch { prompt('Copy this:', text); }
+}
+function applyBrand(b) {
+  const color = /^#[0-9a-f]{6}$/i.test(b?.brand_color || '') ? b.brand_color : null;
+  if (color) document.documentElement.style.setProperty('--brand', color); else document.documentElement.style.removeProperty('--brand');
+  $('#brand').innerHTML = b?.logo_url
+    ? `<img class="brand-logo" src="${esc(b.logo_url)}" alt=""> <span id="brandName">${esc(b.name)}</span>`
+    : `<span class="logo">${esc((b?.name || 'S').trim()[0].toUpperCase())}</span> <span id="brandName">${esc(b?.name || 'SkillTrack')}</span>`;
+}
+
+async function renderSettings(ctx) {
+  view = 'settings';
+  app.innerHTML = `${ctx.fromSuper ? `<button class="link" id="back">← All companies</button>` : ''}
+    <h1>${esc(ctx.companyName || 'Company settings')}</h1><p class="muted">Your company's login link and branding.</p>
+    ${adminNav('settings', ctx)}<div id="setBody" class="card">Loading…</div>`;
+  wireNav(ctx);
+  if (ctx.fromSuper) $('#back').onclick = renderCompanies;
+  const { data: co, error } = await sb.from('companies').select('*').eq('id', ctx.companyId).single();
+  if (error) return $('#setBody').innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`;
+  let logo = co.logo_url || null;
+  const link = tenantUrl(co.slug);
+  $('#setBody').outerHTML = `<div id="setBody">
+    <div class="card"><h2>Your company's login link</h2>
+      <p class="muted small">Share this link with employees. It shows your logo and name on the login page, and is used in welcome emails.</p>
+      <div class="row"><code class="pw" style="font-size:14px">${esc(link)}</code><button class="sec" id="copyTenant">Copy link</button></div></div>
+    <div class="card"><h2>Branding</h2>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));align-items:start">
+        <div><label>Logo (PNG, JPG or WebP, up to 1 MB)</label>
+          <div class="logo-box" id="logoBox">${logo ? `<img src="${esc(logo)}" alt="Logo">` : '<span class="muted small">No logo yet</span>'}</div>
+          <input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp">
+          ${logo ? '<button class="link" id="logoRemove">Remove logo</button>' : ''}</div>
+        <div><label>Brand colour</label><div class="row"><input type="color" id="brandColor" value="${esc(co.brand_color || DEFAULT_BRAND)}" style="width:64px;height:40px;padding:2px">
+          <button class="link" id="colorReset">Use default</button></div>
+          <p class="muted small">Used for buttons, links and certificates.</p>
+          <div class="row" style="margin-top:6px"><button type="button" id="previewBtn" class="sec">Preview</button></div></div>
+      </div>
+      <div class="row" style="margin-top:16px"><button id="saveBrand">Save branding</button><span class="muted small" id="brandMsg"></span></div></div></div>`;
+  $('#copyTenant').onclick = () => copyText(link, 'Login link copied.');
+  const preview = () => applyBrand({ name: co.name, logo_url: logo, brand_color: $('#brandColor').value });
+  $('#brandColor').oninput = preview; $('#previewBtn').onclick = preview;
+  $('#colorReset').onclick = () => { $('#brandColor').value = DEFAULT_BRAND; preview(); };
+  if ($('#logoRemove')) $('#logoRemove').onclick = () => { logo = null; $('#logoBox').innerHTML = '<span class="muted small">No logo yet</span>'; preview(); };
+  $('#logoFile').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (f.size > 1048576) { e.target.value = ''; return toast('The logo must be 1 MB or smaller.'); }
+    $('#brandMsg').textContent = 'Uploading logo…';
+    const path = `${co.id}/logo-${Date.now()}.${(f.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+    const { error: upErr } = await sb.storage.from('logos').upload(path, f, { contentType: f.type });
+    $('#brandMsg').textContent = '';
+    if (upErr) return toast(friendly(upErr));
+    logo = sb.storage.from('logos').getPublicUrl(path).data.publicUrl;
+    $('#logoBox').innerHTML = `<img src="${esc(logo)}" alt="Logo">`; preview();
+    toast('Logo uploaded. Click Save branding to keep it.');
+  };
+  $('#saveBrand').onclick = async () => {
+    const color = $('#brandColor').value.toLowerCase() === DEFAULT_BRAND ? null : $('#brandColor').value;
+    const { error: e2 } = await sb.rpc('update_branding', { p_company: co.id, p_logo_url: logo, p_color: color });
+    if (e2) return toast(friendly(e2));
+    if (me.company && !ctx.fromSuper) Object.assign(me.company, { logo_url: logo, brand_color: color });
+    applyBrand(ctx.fromSuper ? null : me.company);
+    toast('Branding saved.');
+  };
 }

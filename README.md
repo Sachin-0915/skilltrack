@@ -51,6 +51,13 @@ Simple training and compliance tracking for growing companies: assign mandatory 
 - Employees must **choose their own password at first login**
 - Passwords are never stored in a readable form; logins are managed by a Supabase Edge Function (`supabase/functions/manage-users`) that checks the caller is HR admin of that company
 
+## Week 7 features (live)
+- **File uploads**: HR can upload PDF and MP4/WebM files (up to 50 MB) as lessons, as well as paste links
+- Files are **private**: stored per company, and learners open them through links that expire after an hour
+- **Company branding**: each company gets its own **login link** (`?company=<name>`) with its logo, name and colour
+- **Company settings** tab: copy the login link, upload a logo, choose a brand colour
+- The logo and colour appear in the header, on the login page, in welcome emails and on **certificates**
+
 Coming next: automatic training reminder emails.
 
 ## One-time setup
@@ -59,7 +66,7 @@ Coming next: automatic training reminder emails.
 1. Open your Supabase project → **SQL Editor** → **New query**.
 2. Open `setup.sql`, find `YOUR_EMAIL_HERE` at the bottom and replace it with **your** email (this becomes the Super Admin).
 3. Paste the whole file into the editor and click **Run**. You should see "Success. No rows returned".
-4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`, then `week6.sql`.
+4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`, then `week6.sql`, then `week7.sql`.
 
 ### 2. Login settings (Supabase)
 1. **Authentication → URL Configuration**
@@ -76,6 +83,10 @@ Coming next: automatic training reminder emails.
 1. Run `week6.sql` in the SQL Editor.
 2. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `manage-users`, paste `supabase/functions/manage-users/index.ts`, Deploy.
 3. Optional, for emails: create a free Brevo account, verify your sender email, create an API key, and add the secrets `BREVO_API_KEY`, `SENDER_EMAIL` (and optionally `SENDER_NAME`).
+
+### 3c. File uploads and branding
+1. Run `week7.sql` in the SQL Editor (creates the storage buckets and their security rules).
+2. Re-deploy `manage-users` with the updated file (welcome emails now use each company's login link and logo).
 
 ### 4. Connect the app
 Open `config.js` and paste your **Project URL** and **anon public** key from Supabase → Project Settings → API.

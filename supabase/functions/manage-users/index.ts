@@ -23,11 +23,12 @@ function tempPassword(): string {
   return chars.join("");
 }
 
-function emailHtml(kind: "welcome" | "reset", name: string, company: string, url: string, email: string, password: string) {
+function emailHtml(kind: "welcome" | "reset", name: string, company: string, url: string, email: string, password: string, logo?: string | null) {
   const intro = kind === "welcome"
     ? `${esc(company)} has set up your SkillTrack account for workplace training.`
     : `Your SkillTrack password for ${esc(company)} has been reset by your administrator.`;
   return `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#1d2433">
+  ${logo && /^https:\/\//.test(logo) ? `<img src="${esc(logo)}" alt="${esc(company)}" style="max-height:56px;max-width:220px;margin:8px 0">` : ""}
   <h2 style="color:#2f5bea">${kind === "welcome" ? "Welcome to SkillTrack" : "Your new SkillTrack password"}</h2>
   <p>Hi ${esc(name)},</p><p>${intro}</p>
   <table style="border-collapse:collapse;margin:16px 0">
@@ -72,7 +73,7 @@ Deno.serve(async (req) => {
   if (!ids.length || ids.length > 200) return reply(400, { error: "Choose between 1 and 200 employees." });
 
   const { data: members, error } = await admin.from("members")
-    .select("id, email, full_name, company_id, user_id, active, companies(name)").in("id", ids);
+    .select("id, email, full_name, company_id, user_id, active, companies(name, slug, logo_url)").in("id", ids);
   if (error) return reply(500, { error: "Could not load employees." });
 
   // The caller must be HR admin of every company involved (or the Super Admin).
@@ -84,7 +85,10 @@ Deno.serve(async (req) => {
   const emailConfigured = !!(Deno.env.get("BREVO_API_KEY") && Deno.env.get("SENDER_EMAIL"));
   const results = [];
   for (const m of members ?? []) {
-    const company = (m as any).companies?.name ?? "Your company";
+    const co = (m as any).companies ?? {};
+    const company = co.name ?? "Your company";
+    // Tenant login link: shows this company's logo and name on the login page.
+    const loginUrl = appUrl && co.slug ? `${appUrl}?company=${encodeURIComponent(co.slug)}` : appUrl;
     const base = { member_id: m.id, full_name: m.full_name, email: m.email };
     if (!m.active) { results.push({ ...base, error: "Employee is deactivated." }); continue; }
     if (m.user_id === caller.id) { results.push({ ...base, error: "Use your own profile to change your password." }); continue; }
@@ -112,10 +116,10 @@ Deno.serve(async (req) => {
       }
       await admin.from("members").update({ must_change_password: true }).eq("id", m.id);
       const kind = action === "create_login" ? "welcome" : "reset";
-      const emailed = appUrl ? await sendEmail(m.email, m.full_name,
+      const emailed = loginUrl ? await sendEmail(m.email, m.full_name,
         kind === "welcome" ? `Welcome to SkillTrack - your login for ${company}` : "Your SkillTrack password has been reset",
-        emailHtml(kind, m.full_name, company, appUrl, m.email, password)) : false;
-      results.push({ ...base, password, emailed });
+        emailHtml(kind, m.full_name, company, loginUrl, m.email, password, co.logo_url)) : false;
+      results.push({ ...base, password, emailed, login_url: loginUrl });
     } catch (e) {
       console.error(e);
       results.push({ ...base, error: "Could not update this login. Please try again." });

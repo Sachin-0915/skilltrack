@@ -4,7 +4,7 @@
 
 **Live app:** https://sachin-0915.github.io/skilltrack/?company=demo-company (opens the branded login page; logins are created by each company's HR, so a guided demo is available on request)
 
-![Branded login page](docs/screenshots/01-branded-login.png)
+![Branded login page](01-branded-login.png)
 
 ## Why I built it
 
@@ -25,9 +25,9 @@ SkillTrack is my answer: an LMS a company can set up in a day, where HR can crea
 
 | | |
 | --- | --- |
-| ![Employees](docs/screenshots/02-employees.png) **Employees and logins** | ![Courses](docs/screenshots/03-courses-ai.png) **Courses, with AI course creation** |
-| ![Quiz](docs/screenshots/04-quiz.png) **Learner quiz** | ![Reports](docs/screenshots/05-reports.png) **Reports and at-risk list** |
-| ![Certificate](docs/screenshots/06-certificate.png) **Branded certificate** | |
+| ![Employees](02-employees.png) **Employees and logins** | ![Courses](03-courses-ai.png) **Courses, with AI course creation** |
+| ![Quiz](04-quiz.png) **Learner quiz** | ![Reports](05-reports.png) **Reports and at-risk list** |
+| ![Certificate](06-certificate.png) **Branded certificate** | |
 
 ## How it works
 
@@ -64,7 +64,7 @@ flowchart LR
 
 Plain HTML, CSS and JavaScript (no build step) · Supabase (Postgres, Auth, Row Level Security, Storage, Edge Functions) · Claude API · Brevo · GitHub Pages
 
-Want to run your own copy? See the [setup guide](docs/SETUP.md).
+Want to run your own copy? See the [setup guide](SETUP.md).
 
 ---
 Built by **Sachin D**, product specialist with 6+ years in LMS and EdTech · [LinkedIn](https://www.linkedin.com/in/sachin-d-aa1583256/)

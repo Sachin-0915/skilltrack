@@ -1,114 +1,70 @@
 # SkillTrack
 
-Simple training and compliance tracking for growing companies: assign mandatory training, track completion against deadlines, and prove compliance.
+**A simple, AI-assisted LMS that helps growing companies assign mandatory training, track completion against deadlines, and prove compliance.**
 
-![Employees screen](screenshot-employees.png)
+**Live app:** https://sachin-0915.github.io/skilltrack/?company=demo-company (opens the branded login page; logins are created by each company's HR, so a guided demo is available on request)
 
-## Week 1 features (live)
-- Login, sign-up and password reset (Supabase Auth)
-- Four roles: **Super Admin** (SkillTrack owner), **Org Admin** (company HR), **Manager**, **Learner**
-- Super Admin creates client companies and their first HR admin, with user limits and pause/activate
-- HR adds employees one by one or by **CSV upload**, with row-by-row validation
-- Employee list with search, department and status filters, role changes, deactivate/reactivate
-- Only invited emails can create an account
-- Each company's data is isolated by database security rules (Row Level Security)
+![Branded login page](docs/screenshots/01-branded-login.png)
 
-## Week 2 features (live)
-- **Course builder** for HR: details, pass mark, quiz attempts, lessons (text, YouTube/Vimeo video, PDF link) with reordering, and a multiple-choice final quiz
-- Publish / unpublish, delete
-- **Assign** a course to everyone, a department or selected people, with a due date
-- **Assigned learners** table: status (including Overdue), lesson progress, best score, attempts, reset attempts, remove
-- **My learning** for every employee: to-do and completed courses, progress bars, due dates
-- **Course player**: lessons in order, then the quiz; quiz is graded on the server so answers are never sent to the browser
-- **Certificate of completion** (print or save as PDF) with a unique certificate number
-- **Manager view** of their team's training
+## Why I built it
 
-![Course builder](screenshot-course-builder.png)
-![Lesson](screenshot-lesson.png)
-![Certificate](screenshot-certificate.png)
+I have spent six years running enterprise LMS platforms: onboarding tens of thousands of learners, configuring tenants, building assessments and chasing completion reports. Small and mid-size companies have the same compliance needs (POSH, information security, onboarding) but run training on email, shared drives and Excel, because enterprise LMS tools are too expensive and complex for them.
 
-## Week 4 features (live)
-- **Reports** tab for HR: completion rate, overdue count, people at risk, average score
-- Completion by course and by department, filterable
-- **At-risk list** with a plain-English reason (overdue, failed, due soon with little progress, not started)
-- **Email reminder** button: opens HR's email app with the selected learners in BCC and a ready message
-- Export the full report or the at-risk list to CSV
-- More reliable PDF lessons, and tighter database permissions
+SkillTrack is my answer: an LMS a company can set up in a day, where HR can create a course with AI in minutes and always knows who needs a nudge.
 
-![Reports](screenshot-reports.png)
+## What it does
 
-## Week 5 features (live)
-- **Create a course with AI**: HR types a topic (and optionally pastes their own policy), picks audience, level, number of lessons and questions
-- Claude drafts the lessons and the quiz as structured data; with source material it uses only that content
-- **No API key yet?** "Use a free AI chat" gives HR a ready prompt to paste into any AI chat (e.g. the claude.ai free plan) and reads the answer back in, with the same checks
-- HR reviews a preview, then saves it as a **draft** course to edit and publish (nothing is published automatically)
-- Runs in a Supabase Edge Function (`supabase/functions/ai-course`), so the AI key never reaches the browser, and only HR admins can use it
+| For | Features |
+| --- | --- |
+| **HR admins** | Add employees one by one or by CSV · create logins with temporary passwords, welcome emails and password resets · build courses (text, video, PDF, uploads) with a final quiz · **create a course with AI** from a topic or their own policy · assign courses to everyone, a department or selected people with a due date · reports with an **at-risk list** and reminder emails · company logo, colour and login link |
+| **Learners** | My learning dashboard with due dates · course player · quiz with instant score and retries · certificate of completion · must set their own password at first login |
+| **Managers** | Their team's training status |
+| **SkillTrack owner** | Create client companies (tenants), set user limits, pause or activate |
 
-## Week 6 features (live)
-- **Admin-created logins**: when HR adds an employee (one by one, CSV, or a new company's HR admin), SkillTrack can create the login straight away
-- A **temporary password** is generated, shown to the admin **once** with a Copy button (and Copy all / Download CSV for bulk), and emailed in a **welcome email** with the login page, email and password
-- **Reset password** for any employee: a new temporary password, shown once and emailed
-- Employees must **choose their own password at first login**
-- Passwords are never stored in a readable form; logins are managed by a Supabase Edge Function (`supabase/functions/manage-users`) that checks the caller is HR admin of that company
+### Screenshots
 
-## Week 7 features (live)
-- **File uploads**: HR can upload PDF and MP4/WebM files (up to 50 MB) as lessons, as well as paste links
-- Files are **private**: stored per company, and learners open them through links that expire after an hour
-- **Company branding**: each company gets its own **login link** (`?company=<name>`) with its logo, name and colour
-- **Company settings** tab: copy the login link, upload a logo, choose a brand colour
-- The logo and colour appear in the header, on the login page, in welcome emails and on **certificates**
+| | |
+| --- | --- |
+| ![Employees](docs/screenshots/02-employees.png) **Employees and logins** | ![Courses](docs/screenshots/03-courses-ai.png) **Courses, with AI course creation** |
+| ![Quiz](docs/screenshots/04-quiz.png) **Learner quiz** | ![Reports](docs/screenshots/05-reports.png) **Reports and at-risk list** |
+| ![Certificate](docs/screenshots/06-certificate.png) **Branded certificate** | |
 
-Coming next: automatic training reminder emails.
+## How it works
 
-## One-time setup
+```mermaid
+flowchart LR
+  B[Browser app<br/>HTML, CSS, JavaScript<br/>GitHub Pages] -->|login, data| S[(Supabase<br/>Postgres + Auth + Storage)]
+  B -->|create logins, reset passwords| F1[Edge Function<br/>manage-users]
+  B -->|draft a course| F2[Edge Function<br/>ai-course]
+  F1 -->|welcome emails| E[Brevo]
+  F2 -->|structured JSON| C[Claude API]
+  F1 --> S
+```
 
-### 1. Database (Supabase)
-1. Open your Supabase project → **SQL Editor** → **New query**.
-2. Open `setup.sql`, find `YOUR_EMAIL_HERE` at the bottom and replace it with **your** email (this becomes the Super Admin).
-3. Paste the whole file into the editor and click **Run**. You should see "Success. No rows returned".
-4. Then open a **New query**, paste the whole of `week2.sql` and click **Run**. Do the same with `week4.sql`, then `week6.sql`, then `week7.sql`.
+- **Multi-tenant by design:** every record carries a company ID, and Postgres **Row Level Security** makes sure a company can only ever read its own employees, courses, progress and files.
+- **Secure by default:** quizzes are graded in the database, so answers never reach the learner's browser; uploaded files are private and opened through links that expire; passwords are never stored in a readable form; API keys live only in server functions.
+- **AI with a human in the loop:** Claude drafts lessons and quiz questions as structured data (only from the company's own policy when one is pasted); HR reviews the draft before anything is published. Without an API key, HR can use a free AI chat and paste the answer back in.
+- **Tested:** every database script was run against Postgres with misuse tests (cross-company access, self-promotion, quiz cheating), and every screen was tested end to end in a headless browser.
 
-### 2. Login settings (Supabase)
-1. **Authentication → URL Configuration**
-   - Site URL: `https://sachin-0915.github.io/skilltrack/`
-   - Redirect URLs: add the same address.
-2. Supabase's built-in email sends only a few emails per hour. That is fine for testing. Before real clients, connect a proper email service (planned for Week 4).
+## What I did as the product owner
 
-### 3. AI course generator (optional)
-1. Create an API key at console.anthropic.com (add a little credit first).
-2. Supabase → **Edge Functions → Secrets** → add `ANTHROPIC_API_KEY` with that key.
-3. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `ai-course`, paste `supabase/functions/ai-course/index.ts`, Deploy.
+- Wrote the product spec (PRD): users, goals, MVP scope, data model, business rules and the build plan
+- Defined the business rules from LMS experience: assignment statuses, overdue and **at-risk** rules, quiz attempts, certificate rules, onboarding and password policy
+- Prioritised and shipped weekly, tested every release on the live product, and fed bugs back into the next iteration
+- Built with AI-assisted development (Claude Code): I owned the product decisions and testing; the AI wrote the code
 
-### 3b. Logins and welcome emails
-1. Run `week6.sql` in the SQL Editor.
-2. Supabase → **Edge Functions → Deploy a new function → Via Editor**, name it `manage-users`, paste `supabase/functions/manage-users/index.ts`, Deploy.
-3. Optional, for emails: create a free Brevo account, verify your sender email, create an API key, and add the secrets `BREVO_API_KEY`, `SENDER_EMAIL` (and optionally `SENDER_NAME`).
+## Roadmap
 
-### 3c. File uploads and branding
-1. Run `week7.sql` in the SQL Editor (creates the storage buckets and their security rules).
-2. Re-deploy `manage-users` with the updated file (welcome emails now use each company's login link and logo).
-
-### 4. Connect the app
-Open `config.js` and paste your **Project URL** and **anon public** key from Supabase → Project Settings → API.
-Never paste the `service_role` key anywhere in this project.
-
-### 5. Publish (GitHub Pages)
-1. Upload all files to the `skilltrack` repo (Add file → Upload files → drag them in → Commit changes).
-2. Settings → Pages → Branch: `main`, folder `/ (root)` → Save.
-3. Open `https://sachin-0915.github.io/skilltrack/`.
-
-### 6. First login
-Click **Create account** with the email you put in `setup.sql`, confirm it from your inbox, then log in. You will see the **Companies** screen.
-
-## Test checklist
-- [ ] Create a test company with yourself as the HR admin using a second email
-- [ ] Log in as that HR admin, upload `sample-employees.csv`
-- [ ] Try signing up with an email that was never added (it should be refused)
-- [ ] Change a role, deactivate and reactivate someone
-- [ ] Open the site on your phone
+- Automatic training reminder emails (3 days before the due date and when overdue)
+- Custom domain and email domain per client
+- SCORM upload, learning paths and a course template library (POSH, InfoSec, Code of Conduct)
+- Payments and self-serve sign-up for new companies
 
 ## Tech
-Plain HTML/CSS/JavaScript (no build step) · Supabase (Postgres, Auth, Row Level Security) · GitHub Pages.
+
+Plain HTML, CSS and JavaScript (no build step) · Supabase (Postgres, Auth, Row Level Security, Storage, Edge Functions) · Claude API · Brevo · GitHub Pages
+
+Want to run your own copy? See the [setup guide](docs/SETUP.md).
 
 ---
-Built by **Sachin D** with AI-assisted development (Claude Code).
+Built by **Sachin D**, product specialist with 6+ years in LMS and EdTech · [LinkedIn](https://www.linkedin.com/in/sachin-d-aa1583256/)
